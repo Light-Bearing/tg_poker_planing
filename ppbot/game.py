@@ -4,8 +4,8 @@ import json
 import aiosqlite
 
 AVAILABLE_POINTS = [
-    "1", "2", "3", "4", "5", "6", "8",
-    "10", "12", "14", "16", "18",
+    "1", "2", "3", "4", "5", "6", 
+    "8", "12", "14", "16", "18",
     "20", "28", "40", "❔", "☕",
 ]
 HALF_POINTS = len(AVAILABLE_POINTS) // 2
