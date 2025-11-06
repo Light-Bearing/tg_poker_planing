@@ -79,87 +79,107 @@ async def poker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Error creating game. Please try again.")
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик callback'ов от кнопок"""
     query = update.callback_query
     await query.answer()
     
     try:
         data = query.data
         chat_id = query.message.chat_id
-        message_id = str(query.message.message_id)
         
         # Обработка голосования
         if data.startswith("vote-click-"):
-            parts = data.split("-")
-            vote_id = parts[2]
-            point = parts[3]
+            await handle_vote_click(query, data, chat_id)
             
-            game = await storage.get_game(chat_id, vote_id)
-            if not game:
-                await query.edit_message_text("Game not found or expired")
-                return
-                
-            if game.revealed:
-                await query.answer("Can't change vote after cards are opened", show_alert=True)
-                return
-            
-            # Добавляем голос
-            voter = {
-                "id": query.from_user.id,
-                "first_name": query.from_user.first_name,
-                "username": query.from_user.username
-            }
-            game.add_vote(voter, point)
-            await storage.save_game(game)
-            
-            # Обновляем сообщение
-            await query.edit_message_text(
-                game.get_text(),
-                reply_markup=game.get_markup()
-            )
-            
-        # Обработка операций (reveal/restart)
+        # Обработка операций
         elif any(data.startswith(op + "-click-") for op in [Game.OP_REVEAL, Game.OP_RESTART, Game.OP_RESTART_NEW, Game.OP_REVEAL_NEW]):
-            parts = data.split("-")
-            operation = parts[0]
-            vote_id = parts[2]
-            
-            game = await storage.get_game(chat_id, vote_id)
-            if not game:
-                await query.answer("Game not found", show_alert=True)
-                return
-            
-            # Проверяем, что операцию запускает инициатор
-            if query.from_user.id != game.initiator["id"]:
-                await query.answer(f"{operation} is available only for initiator", show_alert=True)
-                return
-            
-            current_text = game.get_text()
-            
-            if operation in (Game.OP_RESTART, Game.OP_RESTART_NEW):
-                game.restart()
-            else:
-                game.revealed = True
-                current_text = game.get_text()
-            
-            if operation in (Game.OP_RESTART, Game.OP_REVEAL):
-                await query.edit_message_text(
-                    current_text,
-                    reply_markup=game.get_markup()
-                )
-            else:
-                await query.edit_message_text(current_text)
-                new_message = await query.message.reply_text(
-                    game.get_text(),
-                    reply_markup=game.get_markup()
-                )
-                game.reply_message_id = new_message.message_id
-            
-            await storage.save_game(game)
+            await handle_operation_click(query, data, chat_id)
             
     except Exception as e:
         logger.error(f"Error in callback_handler: {e}")
         await query.answer("Error processing request", show_alert=True)
+
+async def handle_vote_click(query, data, chat_id):
+    """Обработчик кликов по кнопкам голосования"""
+    parts = data.split("-")
+    vote_id = parts[2]
+    point = parts[3]
+    
+    game = await storage.get_game(chat_id, vote_id)
+    if not game:
+        await query.edit_message_text("Game not found or expired")
+        return
+        
+    if game.revealed:
+        await query.answer("Can't change vote after cards are opened", show_alert=True)
+        return
+    
+    # Добавляем голос
+    voter = {
+        "id": query.from_user.id,
+        "first_name": query.from_user.first_name,
+        "username": query.from_user.username
+    }
+    game.add_vote(voter, point)
+    await storage.save_game(game)
+    
+    # Обновляем сообщение с обработкой ошибки "не изменилось"
+    try:
+        await query.edit_message_text(
+            game.get_text(),
+            reply_markup=game.get_markup()
+        )
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            # Игнорируем эту ошибку - это нормально
+            pass
+        else:
+            raise e
+
+async def handle_operation_click(query, data, chat_id):
+    """Обработчик кликов по операциям (reveal/restart)"""
+    parts = data.split("-")
+    operation = parts[0]
+    vote_id = parts[2]
+    
+    game = await storage.get_game(chat_id, vote_id)
+    if not game:
+        await query.answer("Game not found", show_alert=True)
+        return
+    
+    # Проверяем права инициатора
+    if query.from_user.id != game.initiator["id"]:
+        await query.answer(f"{operation} is available only for initiator", show_alert=True)
+        return
+    
+    # Выполняем операцию
+    if operation in (Game.OP_RESTART, Game.OP_RESTART_NEW):
+        game.restart()
+    else:
+        game.revealed = True
+    
+    # Обновляем сообщение с обработкой ошибки "не изменилось"
+    try:
+        if operation in (Game.OP_RESTART, Game.OP_REVEAL):
+            await query.edit_message_text(
+                game.get_text(),
+                reply_markup=game.get_markup()
+            )
+        else:
+            await query.edit_message_text(game.get_text())
+            new_message = await query.message.reply_text(
+                game.get_text(),
+                reply_markup=game.get_markup()
+            )
+            game.reply_message_id = new_message.message_id
+        
+        await storage.save_game(game)
+        
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            # Игнорируем ошибку "не изменилось"
+            await query.answer("No changes to apply")
+        else:
+            raise e
 
 from telegram.ext import MessageHandler, filters
 
