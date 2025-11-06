@@ -1,16 +1,15 @@
 import collections
 import json
-
 import aiosqlite
+from typing import Dict, Any
 
 AVAILABLE_POINTS = [
-    "1", "2", "3", "4", "5", "6", 
+    "1", "2", "3", "4", "5", "6",
     "8", "12", "14", "16", "18",
     "20", "28", "40", "❔", "☕",
 ]
 HALF_POINTS = len(AVAILABLE_POINTS) // 2
 ALL_MARKS = "♥♦♠♣"
-
 
 class Vote:
     def __init__(self):
@@ -37,7 +36,6 @@ class Vote:
         res.point = dct["point"]
         res.version = dct["version"]
         return res
-
 
 class Game:
     OP_RESTART = "restart"
@@ -72,49 +70,51 @@ class Game:
             result += "\n\nCurrent votes:\n{}".format(votes_str)
         return result
 
-    def get_send_kwargs(self):
-        return {"text": self.get_text(), "reply_markup": json.dumps(self.get_markup())}
-
     def get_markup(self):
-        points_keys = [
-            {
-                "type": "InlineKeyboardButton",
-                "text": point,
-                "callback_data": "vote-click-{}-{}".format(self.vote_id, point),
-            }
-            for point in AVAILABLE_POINTS
-        ]
-        return {
-            "type": "InlineKeyboardMarkup",
-            "inline_keyboard": [
-                points_keys[:HALF_POINTS],
-                points_keys[HALF_POINTS:],
-                [
-                    {
-                        "type": "InlineKeyboardButton",
-                        "text": "Restart",
-                        "callback_data": "{}-click-{}".format(self.OP_RESTART, self.vote_id),
-                    },
-                    {
-                        "type": "InlineKeyboardButton",
-                        "text": "Restart 🆕",
-                        "callback_data": "{}-click-{}".format(self.OP_RESTART_NEW, self.vote_id),
-                    },
-                ],
-                [
-                    {
-                        "type": "InlineKeyboardButton",
-                        "text": "Open Cards",
-                        "callback_data": "{}-click-{}".format(self.OP_REVEAL, self.vote_id),
-                    },
-                    {
-                        "type": "InlineKeyboardButton",
-                        "text": "Open Cards 🆕",
-                        "callback_data": "{}-click-{}".format(self.OP_REVEAL_NEW, self.vote_id),
-                    },
-                ],
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        
+        # Создаем кнопки для оценок
+        points_keys = []
+        for point in AVAILABLE_POINTS:
+            points_keys.append(
+                InlineKeyboardButton(
+                    text=point,
+                    callback_data=f"vote-click-{self.vote_id}-{point}"
+                )
+            )
+        
+        # Создаем кнопки управления
+        control_buttons = [
+            [
+                InlineKeyboardButton(
+                    text="Restart",
+                    callback_data=f"{self.OP_RESTART}-click-{self.vote_id}"
+                ),
+                InlineKeyboardButton(
+                    text="Restart 🆕",
+                    callback_data=f"{self.OP_RESTART_NEW}-click-{self.vote_id}"
+                ),
             ],
-        }
+            [
+                InlineKeyboardButton(
+                    text="Open Cards",
+                    callback_data=f"{self.OP_REVEAL}-click-{self.vote_id}"
+                ),
+                InlineKeyboardButton(
+                    text="Open Cards 🆕",
+                    callback_data=f"{self.OP_REVEAL_NEW}-click-{self.vote_id}"
+                ),
+            ],
+        ]
+        
+        # Разделяем кнопки оценок на две строки
+        keyboard = [
+            points_keys[:HALF_POINTS],
+            points_keys[HALF_POINTS:],
+            *control_buttons
+        ]
+        
+        return InlineKeyboardMarkup(keyboard)
 
     def restart(self):
         self.votes.clear()
@@ -161,16 +161,12 @@ class Game:
         res.reply_message_id = dct["reply_message_id"]
         return res
 
-
 class GameRegistry:
     def __init__(self):
         self._db = None
 
     async def init_db(self, db_path):
-        con = aiosqlite.connect(db_path)
-        con.daemon = True
-        self._db = await con
-        # It's pretty dumb schema, but I'm too lazy for proper normalized tables for this task
+        self._db = await aiosqlite.connect(db_path)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS games (
                 chat_id, game_id, 
@@ -178,6 +174,7 @@ class GameRegistry:
                 PRIMARY KEY (chat_id, game_id)
             )
         """)
+        await self._db.commit()
 
     def new_game(self, chat_id, incoming_message_id: str, initiator: dict, text: str):
         return Game(chat_id, incoming_message_id, initiator, text)
