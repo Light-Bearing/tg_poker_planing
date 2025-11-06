@@ -161,6 +161,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in callback_handler: {e}")
         await query.answer("Error processing request", show_alert=True)
 
+from telegram.ext import MessageHandler, filters
+
+# Добавьте после CommandHandler
+async def russian_poker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await poker_command(update, context)
+
+
+
 async def main():
     """Основная функция инициализации"""
     # Инициализация бота
@@ -168,7 +176,8 @@ async def main():
     
     # Добавляем обработчики
     app.add_handler(CommandHandler(["start", "help"], start_command))
-    app.add_handler(CommandHandler(["poker", "p", "покер", "п"], poker_command))
+    app.add_handler(CommandHandler(["poker", "p"], poker_command))
+    app.add_handler(MessageHandler(filters.Regex(r"^(/покер|/п)"), russian_poker_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
     
     # Инициализируем базу данных
