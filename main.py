@@ -197,7 +197,7 @@ async def main():
     # Добавляем обработчики
     app.add_handler(CommandHandler(["start", "help"], start_command))
     app.add_handler(CommandHandler(["poker", "p"], poker_command))
-    app.add_handler(MessageHandler(filters.Regex(r"^(/покер|/п)"), russian_poker_command))
+    app.add_handler(MessageHandler(filters.Regex(r"^(/покер|/п|/зщлук|/з)"), russian_poker_command))
     app.add_handler(CallbackQueryHandler(callback_handler))
     
     # Инициализируем базу данных
