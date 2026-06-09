@@ -14,6 +14,11 @@
             </div>
             <div class="header-right">
                 <div id="connectionStatus" class="connection-status disconnected">OFFLINE</div>
+                <button class="header-btn sound-btn" onclick="toggleSound()" title="Включить/выключить звуки">
+                    <span class="sound-indicator"></span>
+                    <span id="soundIcon">🔊</span>
+                    <span id="soundText">ЗВУК</span>
+                </button>
                 <button class="header-btn" onclick="toggleTheme()">
                     <span id="themeIcon">☀</span> <span id="themeText">СВЕТЛАЯ</span>
                 </button>

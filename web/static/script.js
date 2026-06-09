@@ -5,8 +5,162 @@ let state = {
     selectedPoint: null,
     ws: null,
     reconnectAttempts: 0,
-    wasRevealed: false
+    wasRevealed: false,
+    soundEnabled: localStorage.getItem('pp_sound_enabled') !== 'false'
 };
+
+// ==================== SOUND MANAGER ====================
+class SoundManager {
+    constructor() {
+        this.audioContext = null;
+        this.enabled = true;
+    }
+    
+    init() {
+        if (!this.audioContext) {
+            try {
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.warn('Web Audio API not supported');
+            }
+        }
+    }
+    
+    // Звук вскрытия карт - восходящая мелодия
+    playReveal() {
+        if (!this.enabled || !this.audioContext) return;
+        
+        const now = this.audioContext.currentTime;
+        const notes = [523.25, 659.25, 783.99, 1046.50];
+        
+        notes.forEach((freq, i) => {
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            oscillator.frequency.value = freq;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0, now + i * 0.1);
+            gainNode.gain.linearRampToValueAtTime(0.3, now + i * 0.1 + 0.05);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+            
+            oscillator.start(now + i * 0.1);
+            oscillator.stop(now + i * 0.1 + 0.3);
+        });
+    }
+    
+    // Звук нового голоса - короткий бип
+    playVote() {
+        if (!this.enabled || !this.audioContext) return;
+        
+        const oscillator = this.audioContext.createOscillator();
+        const gainNode = this.audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(this.audioContext.destination);
+        
+        oscillator.frequency.value = 880;
+        oscillator.type = 'sine';
+        
+        const now = this.audioContext.currentTime;
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.2, now + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+        
+        oscillator.start(now);
+        oscillator.stop(now + 0.15);
+    }
+    
+    // Звук сброса - нисходящий тон
+    playReset() {
+        if (!this.enabled || !this.audioContext) return;
+        
+        const oscillator = this.audioContext.createOscillator();
+        const gainNode = this.audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(this.audioContext.destination);
+        
+        oscillator.type = 'sawtooth';
+        
+        const now = this.audioContext.currentTime;
+        oscillator.frequency.setValueAtTime(600, now);
+        oscillator.frequency.exponentialRampToValueAtTime(200, now + 0.3);
+        
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.15, now + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+        
+        oscillator.start(now);
+        oscillator.stop(now + 0.3);
+    }
+    
+    // ✅ НОВОЕ: Звук входа - восходящий двутоновый "приветственный"
+    playJoin() {
+        if (!this.enabled || !this.audioContext) return;
+        
+        const now = this.audioContext.currentTime;
+        const notes = [659.25, 880]; // E5 -> A5
+        
+        notes.forEach((freq, i) => {
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            oscillator.frequency.value = freq;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0, now + i * 0.12);
+            gainNode.gain.linearRampToValueAtTime(0.18, now + i * 0.12 + 0.02);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.12 + 0.2);
+            
+            oscillator.start(now + i * 0.12);
+            oscillator.stop(now + i * 0.12 + 0.2);
+        });
+    }
+    
+    // ✅ НОВОЕ: Звук выхода - нисходящий двутоновый "прощальный"
+    playLeave() {
+        if (!this.enabled || !this.audioContext) return;
+        
+        const now = this.audioContext.currentTime;
+        const notes = [880, 659.25]; // A5 -> E5
+        
+        notes.forEach((freq, i) => {
+            const oscillator = this.audioContext.createOscillator();
+            const gainNode = this.audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            oscillator.frequency.value = freq;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0, now + i * 0.12);
+            gainNode.gain.linearRampToValueAtTime(0.18, now + i * 0.12 + 0.02);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + i * 0.12 + 0.2);
+            
+            oscillator.start(now + i * 0.12);
+            oscillator.stop(now + i * 0.12 + 0.2);
+        });
+    }
+    
+    setEnabled(enabled) {
+        this.enabled = enabled;
+        if (enabled && !this.audioContext) {
+            this.init();
+        }
+    }
+}
+
+const soundManager = new SoundManager();
+
+// ==================== EXISTING CODE ====================
 
 function initTheme() {
     const savedTheme = localStorage.getItem('pp_theme') || 'dark';
@@ -29,6 +183,36 @@ function updateThemeButton(isLight) {
     document.getElementById('themeText').textContent = isLight ? 'ТЁМНАЯ' : 'СВЕТЛАЯ';
 }
 
+function toggleSound() {
+    state.soundEnabled = !state.soundEnabled;
+    localStorage.setItem('pp_sound_enabled', state.soundEnabled);
+    soundManager.setEnabled(state.soundEnabled);
+    updateSoundButton();
+    
+    if (state.soundEnabled) {
+        soundManager.init();
+        soundManager.playVote();
+    }
+}
+
+function updateSoundButton() {
+    const btn = document.querySelector('.sound-btn');
+    const icon = document.getElementById('soundIcon');
+    const text = document.getElementById('soundText');
+    
+    if (!btn) return;
+    
+    if (state.soundEnabled) {
+        btn.classList.remove('muted');
+        icon.textContent = '🔊';
+        if (text) text.textContent = 'ЗВУК';
+    } else {
+        btn.classList.add('muted');
+        icon.textContent = '🔇';
+        if (text) text.textContent = 'ТИХО';
+    }
+}
+
 function toggleTaskField() {
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskGroup = document.getElementById('taskGroup');
@@ -43,6 +227,18 @@ function formatTaskText(text) {
 
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
+    updateSoundButton();
+    
+    // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
+    if (state.soundEnabled) {
+        // AudioContext создается при первом клике пользователя (требование браузеров)
+        document.addEventListener('click', function initAudioOnce() {
+            soundManager.init();
+            document.removeEventListener('click', initAudioOnce);
+        }, { once: true });
+    }
+    soundManager.setEnabled(state.soundEnabled);
+    
     document.getElementById('username').value = state.username;
     
     const urlParams = new URLSearchParams(window.location.search);
@@ -118,7 +314,26 @@ function connectWebSocket(sessionId) {
     state.ws.onmessage = (event) => {
         try {
             const message = JSON.parse(event.data);
-            if (message.type === 'init' || message.type === 'update') updateSessionDisplay(message.data);
+            
+            // ✅ НОВОЕ: Обработка входа/выхода участников
+            if (message.type === 'user_joined') {
+                // Не играем звук для собственного входа
+                if (message.username !== state.username) {
+                    soundManager.playJoin();
+                }
+                updateSessionDisplay(message.data);
+            } else if (message.type === 'user_left') {
+                soundManager.playLeave();
+                updateSessionDisplay(message.data);
+            } else if (message.type === 'init' || message.type === 'update') {
+                const prevVoteCount = document.getElementById('voteCount').textContent;
+                updateSessionDisplay(message.data);
+                
+                const newVoteCount = message.data.vote_count;
+                if (message.type === 'update' && newVoteCount > prevVoteCount) {
+                    soundManager.playVote();
+                }
+            }
         } catch (e) { console.error('Parse error:', e); }
     };
     
@@ -143,12 +358,12 @@ function updateSessionDisplay(session) {
         document.body.classList.add('reveal-effect');
         setTimeout(() => document.body.classList.remove('reveal-effect'), 1600);
         state.wasRevealed = true;
+        
+        soundManager.playReveal();
     } else if (!session.revealed) {
         state.wasRevealed = false;
     }
 
-    // ✅ НОВОЕ: Динамически определяем, являемся ли мы инициатором
-    // Это позволяет автоматически получить/потерять права при передаче роли
     state.isInitiator = (session.initiator_id === `web_${state.username}`);
 
     document.getElementById('taskDisplay').innerHTML = formatTaskText(session.text);
@@ -194,10 +409,8 @@ function updateSessionDisplay(session) {
     
     renderParticipants(session);
     
-    // Показываем кнопку "НОВАЯ ЗАДАЧА" только для инициатора
     document.getElementById('initiatorActions').style.display = state.isInitiator ? 'flex' : 'none';
     
-    // Показываем блок управления только для инициатора
     const controlCard = document.getElementById('initiatorControlCard');
     controlCard.style.display = state.isInitiator ? 'block' : 'none';
     
@@ -210,11 +423,9 @@ function renderParticipants(session) {
     let participants = session.participants || [];
     const uniqueParticipants = {};
     
-    // Строгая дедупликация по user_id
     participants.forEach(p => { uniqueParticipants[p.user_id] = p; });
     let pList = Object.values(uniqueParticipants).map(p => ({ ...p, isYou: p.user_id === `web_${state.username}` }));
 
-    // Сортировка: при вскрытии по оценке (от мин к макс), иначе онлайн первые
     if (session.revealed) {
         const getSortValue = (point) => {
             if (!point) return 999;
@@ -244,7 +455,6 @@ function renderParticipants(session) {
         if (!p.vote) {
             voteDisplay = '<span class="vote-status pending">ОЖИДАЕТ</span>';
         } else if (!session.revealed) {
-            // СТРОГО используем замаскированное значение, которое прислал бэкенд
             const suit = p.vote.point || '♠';
             voteDisplay = `<span class="vote-value masked">${suit}</span>`;
         } else {
@@ -273,8 +483,14 @@ async function castVote(point) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ username: state.username, point: point })
         });
-        if (!response.ok) alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
-    } catch (error) { alert('Ошибка соединения: ' + error.message); }
+        if (!response.ok) {
+            alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
+        } else {
+            soundManager.playVote();
+        }
+    } catch (error) { 
+        alert('Ошибка соединения: ' + error.message); 
+    }
 }
 
 function toggleNewTaskForm() {
@@ -292,7 +508,6 @@ async function startNewTask() {
 }
 
 async function restartSession(newText = null) {
-    // Убран alert-подтверждение
     try {
         const payload = { username: state.username };
         if (newText) payload.new_text = newText;
@@ -305,9 +520,11 @@ async function restartSession(newText = null) {
             alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
             return;
         }
-        // Мерцание при успешном сбросе
+        
+        soundManager.playReset();
+        
         document.body.classList.remove('reveal-effect', 'reset-effect');
-        void document.body.offsetWidth; // force reflow для перезапуска анимации
+        void document.body.offsetWidth;
         document.body.classList.add('reset-effect');
         setTimeout(() => document.body.classList.remove('reset-effect'), 1400);
     } catch (error) { 
@@ -365,7 +582,6 @@ function copyResult() {
     const val = document.getElementById('resultValue').textContent;
     if (val === '-') return;
     
-    // Округляем вверх до целого
     const rounded = Math.ceil(parseFloat(val));
     
     navigator.clipboard.writeText(rounded).then(() => {

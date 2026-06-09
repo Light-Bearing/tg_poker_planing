@@ -76,7 +76,12 @@ class ConnectionManager:
             elif username and session_id in self.session_users:
                 if username in self.session_users[session_id]:
                     del self.session_users[session_id][username]
-                    asyncio.create_task(self.broadcast(session_id, {"type": "update", "data": self._get_enriched_data(session_id)}))
+                    # ✅ НОВОЕ: Рассылаем уведомление о выходе
+                    asyncio.create_task(self.broadcast(session_id, {
+                        "type": "user_left",
+                        "username": username,
+                        "data": self._get_enriched_data(session_id)
+                    }))
 
     async def broadcast(self, session_id: str, message: dict):
         if session_id in self.active_connections:
@@ -88,8 +93,10 @@ class ConnectionManager:
 
     def register_user(self, session_id: str, username: str):
         if session_id not in self.session_users: self.session_users[session_id] = {}
-        if username not in self.session_users[session_id]:
+        is_new = username not in self.session_users[session_id]
+        if is_new:
             self.session_users[session_id][username] = {'status': 'pending', 'vote': None}
+        return is_new
 
     def update_user_vote(self, session_id: str, username: str, vote_data: dict):
         if session_id in self.session_users and username in self.session_users[session_id]:
@@ -382,6 +389,22 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     msg = json.loads(data)
                     if msg.get("type") == "join":
+                        username = msg.get("username")
+                        if username:
+                            is_new = manager.register_user(session_id, username)
+                            if game:
+                                # ✅ НОВОЕ: Если это новый пользователь - рассылаем уведомление о входе
+                                if is_new:
+                                    await manager.broadcast(session_id, {
+                                        "type": "user_joined",
+                                        "username": username,
+                                        "data": enrich_session_response(game, session_id)
+                                    })
+                                else:
+                                    await manager.broadcast(session_id, {
+                                        "type": "update",
+                                        "data": enrich_session_response(game, session_id)
+                                    })
                         username = msg.get("username")
                         if username:
                             manager.register_user(session_id, username)

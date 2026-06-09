@@ -151,6 +151,47 @@ body::before {
 .leave-btn { border-color: rgba(239, 71, 111, 0.3); color: var(--danger); }
 .leave-btn:hover { border-color: var(--danger); background: rgba(239, 71, 111, 0.1); color: var(--danger); }
 
+.sound-btn {
+    position: relative;
+}
+.sound-btn.muted {
+    opacity: 0.5;
+}
+.sound-btn.muted:hover {
+    opacity: 0.7;
+}
+.sound-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.sound-indicator {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 4px var(--success);
+    animation: pulse 2s infinite;
+}
+
+.sound-btn.muted .sound-indicator {
+    background: var(--danger);
+    box-shadow: 0 0 4px var(--danger);
+    animation: none;
+}
+.sound-btn.muted:hover {
+    opacity: 0.9;
+}
+.sound-btn:not(.muted) {
+    border-color: rgba(6, 214, 160, 0.4);
+    color: var(--success);
+}
+.sound-btn:not(.muted):hover {
+    border-color: var(--success);
+    background: rgba(6, 214, 160, 0.1);
+}
+
 .main-content { flex: 1; display: grid; grid-template-columns: 1fr 280px; grid-template-rows: 1fr auto; gap: 0; overflow: hidden; min-height: 0; }
 .left-panel { display: flex; flex-direction: column; padding: 16px 20px; overflow-y: auto; border-right: 1px solid var(--border); min-height: 0; }
 .right-panel { display: flex; flex-direction: column; padding: 16px; overflow-y: auto; background: rgba(10, 25, 41, 0.3); min-height: 0; }
