@@ -4,9 +4,9 @@ import aiosqlite
 from typing import Dict, Any
 
 AVAILABLE_POINTS = [
-    "1", "2", "3", "4", "5", "6",
-    "8", "12", "14", "16", "18",
-    "20", "28", "40", "❔", "☕",
+    "1", "2", "3", "4", "5", "6","7",
+    "8","9", "10","11", "12", "14", "16", 
+    "18", "20", "28", "40","❔", "☕",
 ]
 HALF_POINTS = len(AVAILABLE_POINTS) // 2
 ALL_MARKS = "♥♦♠♣"
@@ -53,7 +53,11 @@ class Game:
         self.revealed = False
 
     def add_vote(self, initiator, point):
-        self.votes[self._initiator_str(initiator)].set(point)
+        # Используем user_id если есть, иначе формируем строку
+        user_id = initiator.get("id") or initiator.get("user_id")
+        if not user_id:
+            user_id = self._initiator_str(initiator)
+        self.votes[user_id].set(point)
 
     def get_text(self):
         result = "{} for:\n{}\nInitiator: {}".format(

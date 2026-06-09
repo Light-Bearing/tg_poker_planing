@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Planning Poker</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-left">
+                <h1><span class="logo-icon">◇</span>PLANNING POKER</h1>
+            </div>
+            <div class="header-right">
+                <div id="connectionStatus" class="connection-status disconnected">OFFLINE</div>
+                <button class="header-btn" onclick="toggleTheme()">
+                    <span id="themeIcon">☀</span> <span id="themeText">СВЕТЛАЯ</span>
+                </button>
+                <button class="header-btn leave-btn hidden" id="leaveBtn" onclick="leaveSession()">✕ ВЫХОД</button>
+            </div>
+        </div>
+        
+        <div id="joinScreen" class="card">
+            <h2><span class="diamond"></span> ПОДКЛЮЧЕНИЕ</h2>
+            <div class="form-group">
+                <label for="username">Идентификатор:</label>
+                <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="sessionId">Комната:</label>
+                <input type="text" id="sessionId" placeholder="Оставьте пустым для создания новой" autocomplete="off" oninput="toggleTaskField()">
+            </div>
+            <div class="form-group" id="taskGroup">
+                <label for="taskText">Описание задачи:</label>
+                <textarea id="taskText" placeholder="Опишите задачу для оценки..."></textarea>
+            </div>
+            <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="joinOrCreateSession()">▸ ИНИЦИАЛИЗИРОВАТЬ</button>
+        </div>
+        
+        <div id="sessionScreen" class="hidden" style="display: flex; flex-direction: column; height: calc(100vh - 52px);">
+            <div class="main-content">
+                <div class="left-panel">
+                    <div class="card">
+                        <h2><span class="diamond"></span> ЗАДАЧА</h2>
+                        <div class="session-info">
+                            <div class="task-text" id="taskDisplay"></div>
+                            <div class="meta">
+                                <span>OPERATOR: <strong id="initiatorDisplay"></strong></span> &nbsp;|&nbsp;
+                                <span>Комната: <span id="sessionIdDisplay" class="session-id-copy" onclick="copySessionId()" title="Нажмите, чтобы скопировать ID комнаты"></span></span>
+                            </div>
+                            <div class="session-link" onclick="copySessionLink()" title="Скопировать ссылку">⟁ <span id="sessionLink"></span></div>
+                        </div>
+                        <div class="actions" id="initiatorActions" style="display:none;">
+                            <button class="btn btn-outline" onclick="toggleNewTaskForm()">▸ НОВАЯ ЗАДАЧА</button>
+                        </div>
+                        <div id="newTaskForm" class="new-task-form">
+                            <div class="form-group" style="margin-bottom: 10px;">
+                                <textarea id="newTaskText" placeholder="Новая задача..." style="min-height: 60px;"></textarea>
+                            </div>
+                            <div style="display: flex; gap: 8px;">
+                                <button class="btn btn-primary" onclick="startNewTask()">▸ ЗАПУСК</button>
+                                <button class="btn btn-outline" onclick="toggleNewTaskForm()">ОТМЕНА</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                        <h2><span class="diamond"></span> УЧАСТНИКИ <span id="participantCount" style="color: var(--text-secondary); margin-left: auto;">0</span></h2>
+                        <div class="participants-section" id="participantsList">
+                            <p class="empty-message">Ожидание подключений...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="right-panel">
+                    <!-- Блок управления (только для инициатора, всегда над АНАЛИЗом) -->
+                    <div class="card" id="initiatorControlCard" style="display:none;">
+                        <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
+                        <div style="display: flex; gap: 8px; flex-direction: column;">
+                            <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>
+                            <button class="btn btn-success" onclick="revealCards()">◈ ОТКРЫТЬ</button>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <h2><span class="diamond"></span> АНАЛИЗ</h2>
+                        <div class="stats">
+                            <div class="stat-card">
+                                <div class="value" id="voteCount">0</div>
+                                <div class="label">Голосов</div>
+                            </div>
+                            <div class="stat-card" id="averageCard" style="display:none;">
+                                <div class="value" id="averageValue">0</div>
+                                <div class="label">Среднее</div>
+                            </div>
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-label" id="progressLabel">0 / 0</div>
+                        </div>
+                    </div>
+                    <div class="card" id="resultCard" style="display:none; cursor: pointer;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
+                        <h2><span class="diamond"></span> РЕЗУЛЬТАТ</h2>
+                        <div style="text-align: center; padding: 10px;">
+                            <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue">-</div>
+                            <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">Итоговая оценка</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bottom-panel">
+                    <div id="votingSection">
+                        <div class="points-grid" id="pointsGrid"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
