@@ -1,6 +1,6 @@
 FROM python:3.11-alpine
 
-# Установка системных зависимостей (минимальный набор)
+# Установка системных зависимостей
 RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /app
@@ -15,6 +15,9 @@ COPY . .
 # Создание непривилегированного пользователя
 RUN adduser -D myuser
 USER myuser
+
+# Expose порт
+EXPOSE 8000
 
 # Запуск приложения
 CMD ["python", "main.py"]
