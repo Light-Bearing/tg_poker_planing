@@ -26,35 +26,114 @@
             </div>
         </div>
         
+        <!-- ==================== ЭКРАН ПОДКЛЮЧЕНИЯ ==================== -->
         <div id="joinScreen" class="card">
-            <h2><span class="diamond"></span> ПОДКЛЮЧЕНИЕ</h2>
-            <div class="form-group">
-                <label for="username">Идентификатор:</label>
-                <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off">
+            <div class="join-header">
+                <h2 class="join-title"><span class="logo-icon-large">◇</span> PLANNING POKER</h2>
+                <p class="join-subtitle">Быстрая оценка задач в команде. Анонимно. Честно. Эффективно.</p>
             </div>
-            <div class="form-group">
-                <label for="sessionId">Комната:</label>
-                <input type="text" id="sessionId" placeholder="Оставьте пустым для создания новой" autocomplete="off" oninput="toggleTaskField()">
+
+            <div class="join-grid-top">
+                <div class="form-column">
+                    <h3 class="form-section-title"><span class="diamond"></span> ПОДКЛЮЧЕНИЕ</h3>
+                    <div class="form-group">
+                        <label for="username">Идентификатор:</label>
+                        <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off">
+                    </div>
+                    <div class="form-group">
+                        <label for="sessionId">Комната:</label>
+                        <input type="text" id="sessionId" placeholder="Оставьте пустым для создания новой" autocomplete="off" oninput="toggleTaskField()">
+                    </div>
+                    <div class="form-group" id="taskGroup">
+                        <label for="taskText">Описание задачи:</label>
+                        <textarea id="taskText" placeholder="Опишите задачу для оценки..."></textarea>
+                    </div>
+                    <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="joinOrCreateSession()">▸ ИНИЦИАЛИЗИРОВАТЬ</button>
+                </div>
+
+                <div class="how-column">
+                    <h3 class="form-section-title"><span class="diamond"></span> КАК ЭТО РАБОТАЕТ</h3>
+                    <div class="how-steps-compact">
+                        <div class="how-step-compact">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <div class="step-title">Создай или войди</div>
+                                <div class="step-desc">ID пустой = новая комната</div>
+                            </div>
+                        </div>
+                        <div class="how-step-compact">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <div class="step-title">Пригласи команду</div>
+                                <div class="step-desc">Поделись ссылкой на комнату</div>
+                            </div>
+                        </div>
+                        <div class="how-step-compact">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <div class="step-title">Голосуй анонимно</div>
+                                <div class="step-desc">Карты скрыты до вскрытия</div>
+                            </div>
+                        </div>
+                        <div class="how-step-compact">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <div class="step-title">Открой карты</div>
+                                <div class="step-desc">Обсуди расхождения</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="form-group" id="taskGroup">
-                <label for="taskText">Описание задачи:</label>
-                <textarea id="taskText" placeholder="Опишите задачу для оценки..."></textarea>
+
+            <div class="join-grid-bottom">
+                <div class="scale-preview">
+                    <div class="scale-title">ШКАЛА ОЦЕНОК</div>
+                    <div class="scale-points" id="scalePoints"></div>
+                    <div class="scale-legend">
+                        <span><strong>❔</strong> Не уверен</span>
+                        <span><strong>☕</strong> Нужен перерыв</span>
+                    </div>
+                </div>
+
+                <div class="recent-rooms" id="recentRooms">
+                    <div class="recent-header">
+                        <div class="recent-title">ПОСЛЕДНИЕ КОМНАТЫ</div>
+                        <button class="recent-clear-btn" id="clearRecentBtn" onclick="clearRecentRooms()" style="display:none;">✕ ОЧИСТИТЬ</button>
+                    </div>
+                    <div class="recent-list" id="recentList">
+                        <div class="recent-empty">Здесь появятся ваши последние комнаты</div>
+                    </div>
+                </div>
             </div>
-            <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="joinOrCreateSession()">▸ ИНИЦИАЛИЗИРОВАТЬ</button>
         </div>
         
+        <!-- ==================== ЭКРАН СЕССИИ ==================== -->
         <div id="sessionScreen" class="hidden" style="display: flex; flex-direction: column; height: calc(100vh - 52px);">
             <div class="main-content">
+                <!-- ЛЕВАЯ ПАНЕЛЬ: ЗАДАЧА + УЧАСТНИКИ -->
                 <div class="left-panel">
-                    <div class="card">
-                        <h2><span class="diamond"></span> ЗАДАЧА</h2>
-                        <div class="session-info">
+                    <!-- БЛОК ЗАДАЧИ -->
+                    <div class="card task-card">
+                        <h2 class="task-header">
+                            <span class="task-header-left">
+                                <span class="diamond"></span> ЗАДАЧА
+                            </span>
+                            <span class="task-header-right">
+                                <span class="meta-operator">
+                                    <span class="meta-label">OP:</span>
+                                    <strong id="initiatorDisplay"></strong>
+                                </span>
+                                <span class="meta-divider">|</span>
+                                <span class="meta-room">
+                                    <span class="meta-label">ID:</span>
+                                    <span id="sessionIdDisplay" class="session-id-copy" onclick="copySessionId(event)" title="Скопировать ID комнаты"></span>
+                                    <span class="session-link-icon" onclick="copySessionLink()" title="Скопировать ссылку на комнату">↗</span>
+                                </span>
+                            </span>
+                        </h2>
+                        <div class="task-body">
                             <div class="task-text" id="taskDisplay"></div>
-                            <div class="meta">
-                                <span>OPERATOR: <strong id="initiatorDisplay"></strong></span> &nbsp;|&nbsp;
-                                <span>Комната: <span id="sessionIdDisplay" class="session-id-copy" onclick="copySessionId()" title="Нажмите, чтобы скопировать ID комнаты"></span></span>
-                            </div>
-                            <div class="session-link" onclick="copySessionLink()" title="Скопировать ссылку">⟁ <span id="sessionLink"></span></div>
                         </div>
                         <div class="actions" id="initiatorActions" style="display:none;">
                             <button class="btn btn-outline" onclick="toggleNewTaskForm()">▸ НОВАЯ ЗАДАЧА</button>
@@ -69,16 +148,21 @@
                             </div>
                         </div>
                     </div>
-                    <div class="card" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
-                        <h2><span class="diamond"></span> УЧАСТНИКИ <span id="participantCount" style="color: var(--text-secondary); margin-left: auto;">0</span></h2>
-                        <div class="participants-section" id="participantsList">
+                    
+                    <!-- БЛОК УЧАСТНИКОВ -->
+                    <div class="card participants-card">
+                        <h2>
+                            <span class="diamond"></span> УЧАСТНИКИ 
+                            <span id="participantCount" class="participant-count">0</span>
+                        </h2>
+                        <div class="participants-grid" id="participantsList">
                             <p class="empty-message">Ожидание подключений...</p>
                         </div>
                     </div>
                 </div>
                 
+                <!-- ПРАВАЯ ПАНЕЛЬ: УПРАВЛЕНИЕ + АНАЛИЗ + РЕЗУЛЬТАТ -->
                 <div class="right-panel">
-                    <!-- Блок управления (только для инициатора, всегда над АНАЛИЗом) -->
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
                         <div style="display: flex; gap: 8px; flex-direction: column;">
@@ -106,6 +190,7 @@
                             <div class="progress-label" id="progressLabel">0 / 0</div>
                         </div>
                     </div>
+                    
                     <div class="card" id="resultCard" style="display:none; cursor: pointer;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
                         <h2><span class="diamond"></span> РЕЗУЛЬТАТ</h2>
                         <div style="text-align: center; padding: 10px;">
@@ -115,14 +200,36 @@
                     </div>
                 </div>
                 
+                <!-- НИЖНЯЯ ПАНЕЛЬ: ГОЛОСОВАНИЕ -->
                 <div class="bottom-panel">
                     <div id="votingSection">
                         <div class="points-grid" id="pointsGrid"></div>
                     </div>
                 </div>
+                
             </div>
         </div>
     </div>
+    
+    <!-- TOAST КОНТЕЙНЕР -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ -->
+    <div id="confirmModal" class="confirm-modal hidden">
+        <div class="confirm-backdrop" onclick="closeConfirmModal(false)"></div>
+        <div class="confirm-dialog">
+            <div class="confirm-header">
+                <span class="confirm-icon">⚠</span>
+                <span class="confirm-title" id="confirmTitle">ПОДТВЕРЖДЕНИЕ</span>
+            </div>
+            <div class="confirm-message" id="confirmMessage"></div>
+            <div class="confirm-actions">
+                <button class="btn btn-outline" onclick="closeConfirmModal(false)">ОТМЕНА</button>
+                <button class="btn btn-primary" id="confirmOkBtn" onclick="closeConfirmModal(true)">ПОДТВЕРДИТЬ</button>
+            </div>
+        </div>
+    </div>
+    
     <script src="/static/script.js"></script>
 </body>
 </html>

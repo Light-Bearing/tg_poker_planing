@@ -244,18 +244,23 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
     """Передаёт роль инициатора следующему участнику, если ушедший был инициатором"""
     game = await storage.get_game(WEB_CHAT_ID, session_id)
     if not game:
+        logger.warning(f"transfer_initiator: game not found for session {session_id}")
         return
     
     leaving_id = f"web_{leaving_username}"
     if game.initiator.get("id") != leaving_id:
-        return  # Ушёл не инициатор
+        # Ушёл не инициатор — ничего не делаем
+        logger.info(f"transfer_initiator: {leaving_username} was not the initiator")
+        return
     
     # Ищем следующего онлайн-участника
     if session_id not in manager.session_users or not manager.session_users[session_id]:
-        logger.info(f"No other participants in session {session_id}, initiator role lost")
+        # ✅ НОВОЕ: Никого нет — НЕ трогаем инициатора в БД!
+        # Когда он вернётся, он останется инициатором (initiator_id в БД не изменён)
+        logger.info(f"transfer_initiator: no other participants, keeping {leaving_username} as initiator in DB for session {session_id}")
         return
     
-    # Берём первого доступного (в реальности - старшего по времени подключения)
+    # Берём первого доступного онлайн-участника
     new_initiator_username = next(iter(manager.session_users[session_id].keys()), None)
     if not new_initiator_username:
         return
@@ -267,11 +272,10 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         "username": new_initiator_username
     }
     await storage.save_game(game)
-    logger.info(f"👑 Initiator role transferred from {leaving_username} to {new_initiator_username} in session {session_id}")
+    logger.info(f"👑 Initiator role transferred: {leaving_username} → {new_initiator_username} in session {session_id}")
     
-    # Рассылаем обновления всем, чтобы новый инициатор увидел кнопки управления
+    # Рассылаем обновления всем
     await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
-
 # ==================== WEB API HANDLERS ====================
 async def web_index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request, "available_points": AVAILABLE_POINTS})

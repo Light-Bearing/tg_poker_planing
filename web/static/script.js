@@ -8,6 +8,209 @@ let state = {
     wasRevealed: false,
     soundEnabled: localStorage.getItem('pp_sound_enabled') !== 'false'
 };
+// ==================== TOAST NOTIFICATION SYSTEM ====================
+class ToastManager {
+    constructor() {
+        this.container = null;
+        this.queue = [];
+    }
+    
+    init() {
+        this.container = document.getElementById('toastContainer');
+    }
+    
+    _createToast(type, title, message, duration = 4000) {
+        if (!this.container) this.init();
+        
+        const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `
+            <div class="toast-icon">${icons[type] || 'ℹ'}</div>
+            <div class="toast-body">
+                <div class="toast-title">${title}</div>
+                <div class="toast-message">${message}</div>
+            </div>
+            <button class="toast-close" onclick="this.parentElement.remove()">✕</button>
+            <div class="toast-progress" style="animation-duration: ${duration}ms;"></div>
+        `;
+        
+        this.container.appendChild(toast);
+        
+        // Ограничиваем количество toast'ов на экране
+        const toasts = this.container.querySelectorAll('.toast');
+        if (toasts.length > 4) {
+            toasts[0].remove();
+        }
+        
+        // Автоскрытие
+        setTimeout(() => {
+            if (toast.parentElement) {
+                toast.classList.add('removing');
+                setTimeout(() => toast.remove(), 250);
+            }
+        }, duration);
+    }
+    
+    success(message, title = 'УСПЕХ') { this._createToast('success', title, message); }
+    error(message, title = 'ОШИБКА') { this._createToast('error', title, message, 5000); }
+    warning(message, title = 'ВНИМАНИЕ') { this._createToast('warning', title, message); }
+    info(message, title = 'ИНФО') { this._createToast('info', title, message); }
+}
+
+// ==================== CONFIRM MODAL SYSTEM ====================
+class ConfirmManager {
+    constructor() {
+        this.resolvePromise = null;
+    }
+    
+    show(message, title = 'ПОДТВЕРЖДЕНИЕ', okText = 'ПОДТВЕРДИТЬ', cancelText = 'ОТМЕНА') {
+        return new Promise(resolve => {
+            this.resolvePromise = resolve;
+            const modal = document.getElementById('confirmModal');
+            document.getElementById('confirmTitle').textContent = title;
+            document.getElementById('confirmMessage').textContent = message;
+            document.getElementById('confirmOkBtn').textContent = okText;
+            modal.classList.remove('hidden');
+            
+            // Фокус на кнопку ОК для быстрых действий с клавиатуры
+            setTimeout(() => document.getElementById('confirmOkBtn').focus(), 50);
+        });
+    }
+    
+    close(result) {
+        const modal = document.getElementById('confirmModal');
+        modal.classList.add('hidden');
+        if (this.resolvePromise) {
+            this.resolvePromise(result);
+            this.resolvePromise = null;
+        }
+    }
+}
+
+const toast = new ToastManager();
+const confirmDialog = new ConfirmManager();
+
+// Глобальная функция для модалки (используется в onclick)
+function closeConfirmModal(result) {
+    confirmDialog.close(result);
+}
+
+// ==================== JOIN SCREEN HELPERS ====================
+const AVAILABLE_POINTS_DISPLAY = [
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", 
+    "11", "12", "14", "16", "18", "20", "28", "40", "❔", "☕"
+];
+const SPECIAL_POINTS = ["❔", "☕"];
+const MAX_RECENT_ROOMS = 5;
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function saveRecentRoom(sessionId, taskText) {
+    let recent = JSON.parse(localStorage.getItem('pp_recent_rooms') || '[]');
+    recent = recent.filter(r => r.id !== sessionId);
+    recent.unshift({
+        id: sessionId,
+        task: taskText || 'Без описания',
+        time: Date.now()
+    });
+    recent = recent.slice(0, MAX_RECENT_ROOMS);
+    localStorage.setItem('pp_recent_rooms', JSON.stringify(recent));
+}
+
+function loadRecentRooms() {
+    try {
+        return JSON.parse(localStorage.getItem('pp_recent_rooms') || '[]');
+    } catch {
+        return [];
+    }
+}
+
+function formatRecentTime(timestamp) {
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    
+    if (minutes < 1) return 'только что';
+    if (minutes < 60) return `${minutes} мин. назад`;
+    if (hours < 24) return `${hours} ч. назад`;
+    if (days < 7) return `${days} дн. назад`;
+    return new Date(timestamp).toLocaleDateString('ru-RU');
+}
+
+function renderRecentRooms() {
+    const recent = loadRecentRooms();
+    const container = document.getElementById('recentRooms');
+    const list = document.getElementById('recentList');
+    const clearBtn = document.getElementById('clearRecentBtn');
+    
+    if (!recent.length) {
+        clearBtn.style.display = 'none';
+        list.innerHTML = '<div class="recent-empty">Здесь появятся ваши последние комнаты</div>';
+        return;
+    }
+    
+    clearBtn.style.display = 'inline-block';
+    
+    // Если имя есть — кнопка "▸ ВОЙТИ" (быстрый вход), иначе "ВОЙТИ"
+    const hasUsername = !!state.username;
+    
+    list.innerHTML = recent.map(room => `
+        <div class="recent-item" onclick="joinRecentRoom('${room.id}')">
+            <div class="recent-info">
+                <div class="recent-id">⟁ ${room.id}</div>
+                <div class="recent-task">${escapeHtml(room.task)}</div>
+            </div>
+            <div class="recent-time">${formatRecentTime(room.time)}</div>
+            <button class="recent-enter">${hasUsername ? '▸ ВОЙТИ' : 'ВОЙТИ'}</button>
+        </div>
+    `).join('');
+}
+
+// ✅ Новая функция очистки истории
+async function clearRecentRooms() {
+    const confirmed = await confirmDialog.show(
+        'Вся история последних комнат будет удалена без возможности восстановления.',
+        'ОЧИСТКА ИСТОРИИ',
+        'ОЧИСТИТЬ',
+        'ОТМЕНА'
+    );
+    if (!confirmed) return;
+    
+    localStorage.removeItem('pp_recent_rooms');
+    renderRecentRooms();
+    toast.info('История комнат очищена');
+}
+
+function joinRecentRoom(sessionId) {
+    // Если у пользователя уже есть идентификатор — сразу подключаемся к комнате
+    if (state.username) {
+        document.getElementById('sessionId').value = sessionId;
+        document.getElementById('taskGroup').style.display = 'none';
+        joinOrCreateSession();
+    } else {
+        // Если имени ещё нет — подставляем ID и просим ввести имя
+        document.getElementById('sessionId').value = sessionId;
+        toggleTaskField();
+        document.getElementById('username').focus();
+        document.getElementById('username').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        toast.info('Введите идентификатор и нажмите ИНИЦИАЛИЗИРОВАТЬ', 'ПОДКЛЮЧЕНИЕ');
+    }
+}
+
+function renderScalePoints() {
+    const container = document.getElementById('scalePoints');
+    if (!container) return;
+    container.innerHTML = AVAILABLE_POINTS_DISPLAY.map(point => {
+        const isSpecial = SPECIAL_POINTS.includes(point);
+        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${point}</div>`;
+    }).join('');
+}
 
 // ==================== SOUND MANAGER ====================
 class SoundManager {
@@ -229,6 +432,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     updateSoundButton();
     
+    // Рендерим превью шкалы и последние комнаты
+    renderScalePoints();
+    renderRecentRooms();
+    
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
     if (state.soundEnabled) {
         // AudioContext создается при первом клике пользователя (требование браузеров)
@@ -256,7 +463,11 @@ async function joinOrCreateSession() {
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskText = document.getElementById('taskText').value.trim();
     
-    if (!username) { alert('Введите идентификатор'); return; }
+    if (!username) { 
+        toast.warning('Введите идентификатор пользователя');
+        document.getElementById('username').focus();
+        return; 
+    }
     
     state.username = username;
     localStorage.setItem('pp_username', username);
@@ -266,9 +477,19 @@ async function joinOrCreateSession() {
             const response = await fetch(`/api/sessions/${sessionId}`);
             if (!response.ok) throw new Error('Комната не найдена');
             const data = await response.json();
-            enterSession(sessionId, data, false);
+            // ✅ Определяем, являемся ли мы инициатором из данных сервера
+            const isMeInitiator = data.initiator_id === `web_${username}`;
+            enterSession(sessionId, data, isMeInitiator);
+            toast.success(
+                isMeInitiator ? 'С возвращением, оператор!' : 'Подключение к комнате установлено',
+                isMeInitiator ? 'ОПЕРАТОР' : 'ПОДКЛЮЧЕНИЕ'
+            );
         } else {
-            if (!taskText) { alert('Опишите задачу'); return; }
+            if (!taskText) { 
+                toast.warning('Опишите задачу для оценки');
+                document.getElementById('taskText').focus();
+                return; 
+            }
             const response = await fetch('/api/sessions', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -277,9 +498,10 @@ async function joinOrCreateSession() {
             if (!response.ok) throw new Error('Ошибка создания комнаты');
             const data = await response.json();
             enterSession(data.session_id, data, true);
+            toast.success('Комната создана. Готовы к оценке!');
         }
     } catch (error) {
-        alert('Ошибка: ' + error.message);
+        toast.error(error.message, 'НЕ УДАЛОСЬ');
     }
 }
 
@@ -287,6 +509,9 @@ function enterSession(sessionId, session, isInitiator) {
     state.sessionId = sessionId;
     state.isInitiator = isInitiator;
     state.wasRevealed = session.revealed;
+    
+    // ✅ НОВОЕ: Сохраняем комнату в историю
+    saveRecentRoom(sessionId, session.text);
     
     document.getElementById('joinScreen').classList.add('hidden');
     document.getElementById('sessionScreen').classList.remove('hidden');
@@ -354,6 +579,8 @@ function updateConnectionStatus(status) {
 }
 
 function updateSessionDisplay(session) {
+    state.isInitiator = (session.initiator_id === `web_${state.username}`);
+
     if (session.revealed && !state.wasRevealed) {
         document.body.classList.add('reveal-effect');
         setTimeout(() => document.body.classList.remove('reveal-effect'), 1600);
@@ -364,12 +591,9 @@ function updateSessionDisplay(session) {
         state.wasRevealed = false;
     }
 
-    state.isInitiator = (session.initiator_id === `web_${state.username}`);
-
     document.getElementById('taskDisplay').innerHTML = formatTaskText(session.text);
     document.getElementById('initiatorDisplay').textContent = session.initiator_name;
     document.getElementById('sessionIdDisplay').textContent = state.sessionId;
-    document.getElementById('sessionLink').textContent = `${window.location.origin}?session=${state.sessionId}`;
     
     const grid = document.getElementById('pointsGrid');
     grid.innerHTML = '';
@@ -442,15 +666,15 @@ function renderParticipants(session) {
         pList.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
     }
 
-    const list = document.getElementById('participantsList');
+    const grid = document.getElementById('participantsList');
     document.getElementById('participantCount').textContent = pList.length;
 
     if (pList.length === 0) {
-        list.innerHTML = '<p class="empty-message">Ожидание подключений...</p>';
+        grid.innerHTML = '<p class="empty-message">Ожидание подключений...</p>';
         return;
     }
 
-    list.innerHTML = pList.map(p => {
+    grid.innerHTML = pList.map(p => {
         let voteDisplay;
         if (!p.vote) {
             voteDisplay = '<span class="vote-status pending">ОЖИДАЕТ</span>';
@@ -463,13 +687,15 @@ function renderParticipants(session) {
         }
 
         return `
-            <div class="participant-item ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''}">
-                <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
-                <div class="participant-info">
-                    <span class="participant-name">${p.username}</span>
+            <div class="participant-card ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''}">
+                <div class="participant-card-header">
+                    <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
+                    <span class="participant-name" title="${p.username}">${p.username}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
                 </div>
-                <div class="participant-vote">${voteDisplay}</div>
+                <div class="participant-vote-area">
+                    ${voteDisplay}
+                </div>
             </div>
         `;
     }).join('');
@@ -484,12 +710,13 @@ async function castVote(point) {
             body: JSON.stringify({ username: state.username, point: point })
         });
         if (!response.ok) {
-            alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
+            const err = await response.json();
+            toast.error(err.error || 'Неизвестная ошибка', 'ОШИБКА ГОЛОСА');
         } else {
             soundManager.playVote();
         }
     } catch (error) { 
-        alert('Ошибка соединения: ' + error.message); 
+        toast.error(error.message, 'НЕТ СВЯЗИ');
     }
 }
 
@@ -501,13 +728,28 @@ function toggleNewTaskForm() {
 
 async function startNewTask() {
     const newText = document.getElementById('newTaskText').value.trim();
-    if (!newText) { alert('Опишите новую задачу'); return; }
+    if (!newText) { 
+        toast.warning('Опишите новую задачу');
+        document.getElementById('newTaskText').focus();
+        return; 
+    }
     await restartSession(newText);
     toggleNewTaskForm();
     document.getElementById('newTaskText').value = '';
 }
 
 async function restartSession(newText = null) {
+    // Для сброса без новой задачи - запрашиваем подтверждение
+    if (!newText) {
+        const confirmed = await confirmDialog.show(
+            'Все текущие голоса будут сброшены. Продолжить?',
+            'СБРОС ГОЛОСОВ',
+            'СБРОСИТЬ',
+            'ОТМЕНА'
+        );
+        if (!confirmed) return;
+    }
+    
     try {
         const payload = { username: state.username };
         if (newText) payload.new_text = newText;
@@ -517,18 +759,20 @@ async function restartSession(newText = null) {
             body: JSON.stringify(payload)
         });
         if (!response.ok) {
-            alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
+            const err = await response.json();
+            toast.error(err.error || 'Неизвестная ошибка', 'НЕ УДАЛОСЬ');
             return;
         }
         
         soundManager.playReset();
+        toast.info('Голосование перезапущено');
         
         document.body.classList.remove('reveal-effect', 'reset-effect');
         void document.body.offsetWidth;
         document.body.classList.add('reset-effect');
         setTimeout(() => document.body.classList.remove('reset-effect'), 1400);
     } catch (error) { 
-        alert('Ошибка соединения: ' + error.message); 
+        toast.error(error.message, 'НЕТ СВЯЗИ');
     }
 }
 
@@ -539,30 +783,54 @@ async function revealCards() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ username: state.username })
         });
-        if (!response.ok) alert('Ошибка: ' + ((await response.json()).error || 'Неизвестная ошибка'));
-    } catch (error) { alert('Ошибка соединения: ' + error.message); }
+        if (!response.ok) {
+            const err = await response.json();
+            toast.error(err.error || 'Неизвестная ошибка', 'НЕ УДАЛОСЬ ОТКРЫТЬ');
+        }
+    } catch (error) { 
+        toast.error(error.message, 'НЕТ СВЯЗИ');
+    }
 }
 
 function leaveSession() {
     if (state.ws) state.ws.close();
-    state.sessionId = null; state.isInitiator = false; state.selectedPoint = null; state.wasRevealed = false;
+    state.sessionId = null; 
+    state.isInitiator = false; 
+    state.selectedPoint = null; 
+    state.wasRevealed = false;
+    
     document.getElementById('joinScreen').classList.remove('hidden');
     document.getElementById('sessionScreen').classList.add('hidden');
     document.getElementById('leaveBtn').classList.add('hidden');
     document.getElementById('newTaskForm').classList.remove('active');
+    
+    // ✅ НОВОЕ: Очищаем форму подключения
+    document.getElementById('sessionId').value = '';
+    document.getElementById('taskText').value = '';
+    document.getElementById('taskGroup').style.display = 'block';
+    
+    // ✅ НОВОЕ: Обновляем историю комнат при возвращении
+    renderRecentRooms();
+    
     window.history.pushState({}, '', window.location.pathname);
+    
+    // Прокручиваем joinScreen наверх, чтобы было видно заголовок
+    document.getElementById('joinScreen').scrollTop = 0;
 }
 
 function copySessionLink() {
     navigator.clipboard.writeText(`${window.location.origin}?session=${state.sessionId}`).then(() => {
-        const el = document.getElementById('sessionLink');
-        const original = el.textContent;
-        el.textContent = '✓ СКОПИРОВАНО';
-        setTimeout(() => { el.textContent = original; }, 2000);
-    }).catch(() => alert('Не удалось скопировать'));
+        toast.success('Ссылка на комнату скопирована', 'ССЫЛКА');
+    }).catch(() => toast.error('Не удалось скопировать ссылку'));
 }
 
-function copySessionId() {
+function copySessionId(event) {
+    // ✅ Останавливаем всплытие, чтобы не сработал обработчик родителя
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
     const sessionId = state.sessionId;
     if (!sessionId) return;
     
@@ -571,11 +839,12 @@ function copySessionId() {
         const original = el.textContent;
         el.textContent = '✓ СКОПИРОВАНО';
         el.classList.add('copied');
+        toast.success('ID комнаты скопирован', 'КОМНАТА');
         setTimeout(() => { 
             el.textContent = original; 
             el.classList.remove('copied');
         }, 2000);
-    }).catch(() => alert('Не удалось скопировать'));
+    }).catch(() => toast.error('Не удалось скопировать ID'));
 }
 
 function copyResult() {
@@ -589,9 +858,10 @@ function copyResult() {
         const original = label.textContent;
         label.textContent = '✓ СКОПИРОВАНО В БУФЕР!';
         label.style.color = 'var(--success)';
+        toast.success(`Оценка ${rounded} скопирована`, 'РЕЗУЛЬТАТ');
         setTimeout(() => { 
             label.textContent = original; 
             label.style.color = 'var(--text-secondary)';
         }, 2000);
-    }).catch(() => alert('Не удалось скопировать'));
+    }).catch(() => toast.error('Не удалось скопировать результат'));
 }
