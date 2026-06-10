@@ -650,6 +650,7 @@ function renderParticipants(session) {
     participants.forEach(p => { uniqueParticipants[p.user_id] = p; });
     let pList = Object.values(uniqueParticipants).map(p => ({ ...p, isYou: p.user_id === `web_${state.username}` }));
 
+    // Сортировка
     if (session.revealed) {
         const getSortValue = (point) => {
             if (!point) return 999;
@@ -664,6 +665,27 @@ function renderParticipants(session) {
         });
     } else {
         pList.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
+    }
+
+    // ✅ НОВОЕ: Считаем мин/макс для подсветки
+    let minPoint = null;
+    let maxPoint = null;
+    let hasVariation = false;
+    
+    if (session.revealed) {
+        const numericPoints = pList
+            .map(p => p.vote?.real_point)
+            .filter(p => p && p !== '❔' && p !== '☕')
+            .map(p => parseFloat(p))
+            .filter(p => !isNaN(p));
+        
+        const uniqueNumeric = [...new Set(numericPoints)];
+        hasVariation = uniqueNumeric.length > 1;
+        
+        if (hasVariation) {
+            minPoint = Math.min(...uniqueNumeric);
+            maxPoint = Math.max(...uniqueNumeric);
+        }
     }
 
     const grid = document.getElementById('participantsList');
@@ -683,7 +705,18 @@ function renderParticipants(session) {
             voteDisplay = `<span class="vote-value masked">${suit}</span>`;
         } else {
             const point = p.vote.real_point || p.vote.point;
-            voteDisplay = `<span class="vote-value revealed">${point}</span>`;
+            
+            // ✅ Определяем класс мин/макс
+            let extraClass = '';
+            if (hasVariation && point !== '❔' && point !== '☕') {
+                const numPoint = parseFloat(point);
+                if (!isNaN(numPoint)) {
+                    if (numPoint === minPoint) extraClass = ' min';
+                    else if (numPoint === maxPoint) extraClass = ' max';
+                }
+            }
+            
+            voteDisplay = `<span class="vote-value revealed${extraClass}">${point}</span>`;
         }
 
         return `
