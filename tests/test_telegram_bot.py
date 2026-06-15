@@ -357,6 +357,23 @@ class TestCallbackHandler:
         await callback_handler(update, MagicMock())
         query.answer.assert_awaited_with("Error processing request", show_alert=True)
 
+    @pytest.mark.asyncio
+    async def test_operation_click_through_callback_handler(self):
+        """callback_handler dispatches operation clicks to handle_operation_click."""
+        game = state.storage.new_game(-100, "cb_op1", {"id": 1, "first_name": "A", "username": "a"}, "task")
+        await state.storage.save_game(game)
+
+        update = MagicMock(spec=Update)
+        query = AsyncMock()
+        query.data = "restart-click-cb_op1"
+        query.message.chat_id = -100
+        query.from_user.id = 1
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+        update.callback_query = query
+        await callback_handler(update, MagicMock())
+        query.edit_message_text.assert_awaited_once()
+
 
 class TestCreateTelegramApp:
     def test_creates_app_without_proxy(self):

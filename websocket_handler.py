@@ -27,9 +27,7 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         )
         return
 
-    new_initiator_username = next(iter(manager.session_users[session_id].keys()), None)
-    if not new_initiator_username:
-        return
+    new_initiator_username = next(iter(manager.session_users[session_id].keys()))
 
     game.initiator = {
         "id": f"web_{new_initiator_username}",

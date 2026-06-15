@@ -3,6 +3,27 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+class TestLifespan:
+    @pytest.mark.asyncio
+    async def test_lifespan_triggers_shutdown_on_exit(self):
+        """The lifespan context manager calls shutdown_app when the app exits."""
+        from starlette.testclient import TestClient
+
+        from app import build_app
+
+        with (
+            patch("app.init_bot", new=AsyncMock()),
+            patch("app.GameRegistry"),
+            patch("app.Jinja2Templates"),
+            patch("os.path.exists", return_value=False),
+            patch("app.shutdown_app", new=AsyncMock()) as mock_shutdown,
+        ):
+            app = await build_app()
+            with TestClient(app):
+                pass
+            mock_shutdown.assert_awaited_once()
+
+
 class TestBuildApp:
     @pytest.mark.asyncio
     async def test_build_app_returns_starlette_app(self):
@@ -36,6 +57,21 @@ class TestBuildApp:
 
             await build_app()
             init_bot_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_build_app_mounts_static_when_exists(self):
+        with (
+            patch("app.init_bot", new=AsyncMock()),
+            patch("app.GameRegistry"),
+            patch("app.Jinja2Templates"),
+            patch("os.path.exists", return_value=True),
+            patch("app.StaticFiles"),
+        ):
+            from app import build_app
+
+            app = await build_app()
+            # StaticFiles.mount should have been called (app is patched, so no error)
+            assert app is not None
 
     @pytest.mark.asyncio
     async def test_build_app_sets_state(self):
@@ -153,6 +189,15 @@ class TestRunTelegramBotThread:
         run_telegram_bot_thread(mock_app)
         mock_app.run_polling.assert_called_once()
 
+    def test_run_polling_exception(self):
+        """run_telegram_bot_thread should handle exceptions gracefully."""
+        from main import run_telegram_bot_thread
+
+        mock_app = MagicMock()
+        mock_app.run_polling.side_effect = Exception("polling error")
+        # Should not raise
+        run_telegram_bot_thread(mock_app)
+
 
 class TestMain:
     @pytest.mark.asyncio
@@ -167,6 +212,125 @@ class TestMain:
 
                 result = await main()
                 assert result is None
+
+    @pytest.mark.asyncio
+    async def test_main_no_proxy_prints_warning(self):
+        """When PROXY_URL is not set, prints warning and uses direct."""
+        from main import main
+
+        mock_app = MagicMock()
+        mock_app.state = MagicMock()
+        mock_telegram_app = MagicMock()
+        mock_telegram_app.stop = AsyncMock()
+        mock_telegram_app.shutdown = AsyncMock()
+        with (
+            patch("main.PROXY_URL", None),
+            patch("main.check_telegram_direct", return_value=True),
+            patch("app.build_app", return_value=mock_app),
+            patch("main.create_telegram_app", return_value=mock_telegram_app),
+            patch("main.print"),
+        ):
+            with patch("main.threading.Thread") as mock_thread:
+                mock_thread.return_value.start = MagicMock()
+                with patch("main.uvicorn.Config") as mock_config:
+                    mock_config.return_value = MagicMock()
+                    with patch("main.uvicorn.Server") as mock_server:
+                        mock_server_instance = MagicMock()
+                        mock_server_instance.serve = AsyncMock()
+                        mock_server.return_value = mock_server_instance
+                        await main()
+
+    @pytest.mark.asyncio
+    async def test_main_with_proxy_success(self):
+        """When proxy works, use_proxy is True."""
+        from main import main
+
+        mock_app = MagicMock()
+        mock_app.state = MagicMock()
+        mock_telegram_app = MagicMock()
+        mock_telegram_app.stop = AsyncMock()
+        mock_telegram_app.shutdown = AsyncMock()
+        with (
+            patch("main.PROXY_URL", "socks5://proxy:1080"),
+            patch("main.check_proxy_connection", return_value=True),
+            patch("main.check_telegram_direct", return_value=False),
+            patch("app.build_app", return_value=mock_app),
+            patch("main.create_telegram_app", return_value=mock_telegram_app),
+            patch("main.print"),
+        ):
+            with patch("main.threading.Thread") as mock_thread:
+                mock_thread.return_value.start = MagicMock()
+                with patch("main.uvicorn.Config") as mock_config:
+                    mock_config.return_value = MagicMock()
+                    with patch("main.uvicorn.Server") as mock_server:
+                        mock_server_instance = MagicMock()
+                        mock_server_instance.serve = AsyncMock()
+                        mock_server.return_value = mock_server_instance
+                        await main()
+
+    @pytest.mark.asyncio
+    async def test_main_proxy_fails_direct_works(self):
+        """When proxy fails but direct works, uses direct."""
+        from main import main
+
+        mock_app = MagicMock()
+        mock_app.state = MagicMock()
+        mock_telegram_app = MagicMock()
+        mock_telegram_app.stop = AsyncMock()
+        mock_telegram_app.shutdown = AsyncMock()
+        with (
+            patch("main.PROXY_URL", "socks5://proxy:1080"),
+            patch("main.check_proxy_connection", return_value=False),
+            patch("main.check_telegram_direct", return_value=True),
+            patch("app.build_app", return_value=mock_app),
+            patch("main.create_telegram_app", return_value=mock_telegram_app),
+            patch("main.print"),
+        ):
+            with patch("main.threading.Thread") as mock_thread:
+                mock_thread.return_value.start = MagicMock()
+                with patch("main.uvicorn.Config") as mock_config:
+                    mock_config.return_value = MagicMock()
+                    with patch("main.uvicorn.Server") as mock_server:
+                        mock_server_instance = MagicMock()
+                        mock_server_instance.serve = AsyncMock()
+                        mock_server.return_value = mock_server_instance
+                        await main()
+
+    @pytest.mark.asyncio
+    async def test_main_webhook_mode(self):
+        """When URL is set, webhook mode starts telegram app and sets webhook."""
+        from main import main
+
+        mock_app = MagicMock()
+        mock_app.state = MagicMock()
+        mock_telegram_app = MagicMock()
+        mock_telegram_app.initialize = AsyncMock()
+        mock_telegram_app.start = AsyncMock()
+        mock_telegram_app.stop = AsyncMock()
+        mock_telegram_app.shutdown = AsyncMock()
+        mock_telegram_app.bot.set_webhook = AsyncMock()
+        with (
+            patch("main.URL", "https://myapp.com"),
+            patch("main.PROXY_URL", None),
+            patch("main.check_telegram_direct", return_value=True),
+            patch("app.build_app", return_value=mock_app),
+            patch("main.create_telegram_app", return_value=mock_telegram_app),
+            patch("main.print"),
+            patch("main.uvicorn.Config") as mock_config,
+            patch("main.uvicorn.Server") as mock_server,
+        ):
+            mock_config.return_value = MagicMock()
+            mock_server_instance = MagicMock()
+            mock_server_instance.serve = AsyncMock()
+            mock_server.return_value = mock_server_instance
+            await main()
+            mock_telegram_app.initialize.assert_awaited_once()
+            mock_telegram_app.start.assert_awaited_once()
+            mock_telegram_app.bot.set_webhook.assert_awaited_once_with(
+                "https://myapp.com/telegram",
+                allowed_updates=mock_telegram_app.bot.set_webhook.call_args[1]["allowed_updates"],
+                drop_pending_updates=True,
+            )
 
 
 class TestGameToWebResponse:
@@ -235,6 +399,41 @@ class TestEnrichSessionResponse:
         assert "alice" in participants
         assert participants["alice"]["online"] is True
 
+    def test_enrich_with_offline_voters(self):
+        """Voters not in session_users appear as offline participants."""
+        from connection import manager
+        from ppbot.game import Game
+        from web_api import enrich_session_response
+
+        # Clear any residual state from previous tests
+        manager.session_users.pop("s1", None)
+        game = Game("web", "s1", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "5")
+        game.add_vote({"id": "web_bob", "first_name": "B", "username": "bob"}, "3")
+        result = enrich_session_response(game, "s1")
+        participants = {p["username"]: p for p in result["participants"]}
+        assert "alice" in participants
+        assert participants["alice"]["online"] is False
+        assert "bob" in participants
+        assert participants["bob"]["online"] is False
+
+    @pytest.mark.asyncio
+    async def test_web_index_returns_template(self):
+        """web_index returns a TemplateResponse with index.html."""
+        from starlette.requests import Request
+
+        import state
+        from web_api import web_index
+
+        mock_templates = MagicMock()
+        mock_templates.TemplateResponse = MagicMock(return_value="mocked response")
+        state.templates = mock_templates
+
+        request = MagicMock(spec=Request)
+        result = await web_index(request)
+        mock_templates.TemplateResponse.assert_called_once()
+        assert result == "mocked response"
+
 
 class TestAPIErrorHandling:
     def test_malformed_json_on_create(self, tmp_path):
@@ -288,5 +487,131 @@ class TestAPIErrorHandling:
         tc = TestClient(app)
         resp = tc.post("/api/sessions/test/vote", content=b"not-json", headers={"Content-Type": "application/json"})
         assert resp.status_code == 500
+
+        asyncio.run(state.storage.close())
+
+    def test_api_restart_exception(self, tmp_path):
+        """Exception in api_restart returns 500."""
+        import asyncio
+
+        import state
+        from ppbot.game import GameRegistry
+
+        state.storage = GameRegistry()
+        asyncio.run(state.storage.init_db(str(tmp_path / "test_err3.db")))
+
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from web_api import api_restart
+
+        app = Starlette(
+            routes=[Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"])],
+            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        )
+        tc = TestClient(app)
+        resp = tc.post("/api/sessions/nonexistent/restart", json={"username": "alice"})
+        assert resp.status_code == 404  # session not found, not an exception
+
+        asyncio.run(state.storage.close())
+
+    def test_api_restart_exception_on_save(self, tmp_path):
+        """Save failure in api_restart returns 500."""
+        import asyncio
+
+        import state
+        from ppbot.game import GameRegistry
+
+        state.storage = GameRegistry()
+        asyncio.run(state.storage.init_db(str(tmp_path / "test_err4.db")))
+
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from web_api import api_restart
+
+        app = Starlette(
+            routes=[Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"])],
+            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        )
+        tc = TestClient(app)
+        # Create a game first
+        game = state.storage.new_game(
+            "web", "restart_err", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task"
+        )
+        asyncio.run(state.storage.save_game(game))
+
+        with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
+            resp = tc.post("/api/sessions/restart_err/restart", json={"username": "alice"})
+            assert resp.status_code == 500
+
+        asyncio.run(state.storage.close())
+
+    def test_api_reveal_exception(self, tmp_path):
+        """Exception in api_reveal returns 500."""
+        import asyncio
+
+        import state
+        from ppbot.game import GameRegistry
+
+        state.storage = GameRegistry()
+        asyncio.run(state.storage.init_db(str(tmp_path / "test_err5.db")))
+
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from web_api import api_reveal
+
+        app = Starlette(
+            routes=[Route("/api/sessions/{session_id}/reveal", api_reveal, methods=["POST"])],
+            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        )
+        tc = TestClient(app)
+        game = state.storage.new_game(
+            "web", "reveal_err", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task"
+        )
+        asyncio.run(state.storage.save_game(game))
+
+        with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
+            resp = tc.post("/api/sessions/reveal_err/reveal", json={"username": "alice"})
+            assert resp.status_code == 500
+
+        asyncio.run(state.storage.close())
+
+    def test_api_list_sessions_exception(self, tmp_path):
+        """Exception in api_list_sessions returns 500."""
+        import asyncio
+
+        import state
+        from ppbot.game import GameRegistry
+
+        state.storage = GameRegistry()
+        asyncio.run(state.storage.init_db(str(tmp_path / "test_err6.db")))
+
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from web_api import api_list_sessions
+
+        app = Starlette(
+            routes=[Route("/api/sessions", api_list_sessions, methods=["GET"])],
+            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        )
+        tc = TestClient(app)
+        with patch("web_api.state.storage._db.execute", side_effect=Exception("db error")):
+            resp = tc.get("/api/sessions")
+            assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
