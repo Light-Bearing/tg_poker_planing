@@ -239,24 +239,21 @@ function renderJoinScaleSelector() {
     }
 
     container.style.display = 'flex';
-    buttonsContainer.innerHTML = entries.map(([key, label]) => {
+    let html = '';
+    for (const [key, label] of entries) {
         const active = key === CURRENT_SCALE_NAME ? 'active' : '';
-        return `<button class="scale-btn ${active}" data-scale="${key}" onclick="onJoinScaleClick('${key}')">${label}</button>`;
-    }).join('');
+        html += `<button class="scale-btn ${active}" data-scale="${key}" onclick="onJoinScaleClick('${key}')">${label}</button>`;
+        if (key === 'custom') {
+            html += `<button class="scale-edit-btn ${CURRENT_SCALE_NAME === 'custom' ? 'visible' : ''}" onclick="event.stopPropagation(); openCustomScaleEditor()" title="Редактировать пользовательскую шкалу">✏️</button>`;
+        }
+    }
+    buttonsContainer.innerHTML = html;
 }
 
 function onJoinScaleClick(scaleName) {
     CURRENT_SCALE_NAME = scaleName;
     renderJoinScaleSelector();
     renderScalePoints(scaleName);
-    updateEditScaleButton(scaleName);
-}
-
-function updateEditScaleButton(scaleName) {
-    const wrap = document.getElementById('editCustomScaleWrap');
-    if (wrap) {
-        wrap.style.display = scaleName === 'custom' ? 'inline-block' : 'none';
-    }
 }
 
 // ==================== CUSTOM SCALE EDITOR ====================
@@ -592,7 +589,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Рендерим превью шкалы, селектор шкалы и последние комнаты
     renderJoinScaleSelector();
     renderScalePoints(CURRENT_SCALE_NAME);
-    updateEditScaleButton(CURRENT_SCALE_NAME);
     renderRecentRooms();
     
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
