@@ -577,13 +577,46 @@ function selectJoinJiraIssue(el, key) {
     if (!issue) return;
 
     const summary = issue.fields?.summary || '';
-    const taskValue = `[${key}] ${summary}`;
+    const description = issue.fields?.description || '';
+    const jiraUrl = jiraSettings.jiraUrl || '';
+    const linked = parseJiraIssueLinks(issue);
+    
+    // Получаем ключ эпика
+    let epicKey = '';
+    if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+        const ev = issue.fields[jiraEpicLinkField];
+        epicKey = typeof ev === 'string' ? ev : (ev?.key || '');
+    }
+    
+    // Сохраняем полную информацию о задаче как currentJiraIssue
+    currentJiraIssue = {
+        key: key,
+        epicKey: epicKey,
+        summary: summary,
+        description: description,
+        url: `${jiraUrl}/browse/${key}`,
+        jiraUrl: jiraUrl,
+        linked: linked
+    };
+    jiraSelectedIssue = key;
+    
+    // Формируем полный JSON для передачи через сервер
+    const jiraData = JSON.stringify({
+        type: 'jira',
+        key: key,
+        epicKey: epicKey,
+        summary: summary,
+        description: description,
+        url: currentJiraIssue.url,
+        jiraUrl: jiraUrl,
+        linked: linked
+    });
+    const taskValue = `__JIRA__${jiraData}`;
     document.getElementById('taskText').value = taskValue;
 
     // Если username заполнен — показываем кнопку "СОЗДАТЬ КОМНАТУ"
     const username = document.getElementById('username').value.trim() || state.username;
     if (username) {
-        // Просто обновляем текст кнопки — пользователь сам нажмёт
         toast.info(`Выбрана задача ${key}. Нажмите «▸ СОЗДАТЬ КОМНАТУ»`, 'JIRA');
     }
 }
