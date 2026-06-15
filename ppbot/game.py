@@ -1,15 +1,33 @@
 import collections
 import json
+
 import aiosqlite
-from typing import Dict, Any
 
 AVAILABLE_POINTS = [
-    "1", "2", "3", "4", "5", "6","7",
-    "8","9", "10","11", "12", "14", "16", 
-    "18", "20", "28", "40","❔", "☕",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "14",
+    "16",
+    "18",
+    "20",
+    "28",
+    "40",
+    "❔",
+    "☕",
 ]
 HALF_POINTS = len(AVAILABLE_POINTS) // 2
 ALL_MARKS = "♥♦♠♣"
+
 
 class Vote:
     def __init__(self):
@@ -37,6 +55,7 @@ class Vote:
         res.version = dct["version"]
         return res
 
+
 class Game:
     OP_RESTART = "restart"
     OP_RESTART_NEW = "restart-new"
@@ -53,22 +72,18 @@ class Game:
         self.revealed = False
 
     def add_vote(self, initiator, point):
-        # Используем user_id если есть, иначе формируем строку
         user_id = initiator.get("id") or initiator.get("user_id")
         if not user_id:
             user_id = self._initiator_str(initiator)
-        self.votes[user_id].set(point)
+        self.votes[str(user_id)].set(point)
 
     def get_text(self):
         result = "{} for:\n{}\nInitiator: {}".format(
-            "Vote" if not self.revealed else "Results",
-            self.text, self._initiator_str(self.initiator)
+            "Vote" if not self.revealed else "Results", self.text, self._initiator_str(self.initiator)
         )
         if self.votes:
             votes_str = "\n".join(
-                "{:3s} {}".format(
-                    vote.point if self.revealed else vote.masked, user_id
-                )
+                "{:3s} {}".format(vote.point if self.revealed else vote.masked, user_id)
                 for user_id, vote in sorted(self.votes.items())
             )
             result += "\n\nCurrent votes:\n{}".format(votes_str)
@@ -76,48 +91,27 @@ class Game:
 
     def get_markup(self):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        
+
         # Создаем кнопки для оценок
         points_keys = []
         for point in AVAILABLE_POINTS:
-            points_keys.append(
-                InlineKeyboardButton(
-                    text=point,
-                    callback_data=f"vote-click-{self.vote_id}-{point}"
-                )
-            )
-        
+            points_keys.append(InlineKeyboardButton(text=point, callback_data=f"vote-click-{self.vote_id}-{point}"))
+
         # Создаем кнопки управления
         control_buttons = [
             [
-                InlineKeyboardButton(
-                    text="Restart",
-                    callback_data=f"{self.OP_RESTART}-click-{self.vote_id}"
-                ),
-                InlineKeyboardButton(
-                    text="Restart 🆕",
-                    callback_data=f"{self.OP_RESTART_NEW}-click-{self.vote_id}"
-                ),
+                InlineKeyboardButton(text="Restart", callback_data=f"{self.OP_RESTART}-click-{self.vote_id}"),
+                InlineKeyboardButton(text="Restart 🆕", callback_data=f"{self.OP_RESTART_NEW}-click-{self.vote_id}"),
             ],
             [
-                InlineKeyboardButton(
-                    text="Open Cards",
-                    callback_data=f"{self.OP_REVEAL}-click-{self.vote_id}"
-                ),
-                InlineKeyboardButton(
-                    text="Open Cards 🆕",
-                    callback_data=f"{self.OP_REVEAL_NEW}-click-{self.vote_id}"
-                ),
+                InlineKeyboardButton(text="Open Cards", callback_data=f"{self.OP_REVEAL}-click-{self.vote_id}"),
+                InlineKeyboardButton(text="Open Cards 🆕", callback_data=f"{self.OP_REVEAL_NEW}-click-{self.vote_id}"),
             ],
         ]
-        
+
         # Разделяем кнопки оценок на две строки
-        keyboard = [
-            points_keys[:HALF_POINTS],
-            points_keys[HALF_POINTS:],
-            *control_buttons
-        ]
-        
+        keyboard = [points_keys[:HALF_POINTS], points_keys[HALF_POINTS:], *control_buttons]
+
         return InlineKeyboardMarkup(keyboard)
 
     def restart(self):
@@ -126,10 +120,7 @@ class Game:
 
     @staticmethod
     def _initiator_str(initiator: dict) -> str:
-        return "@{} ({})".format(
-            initiator.get("username") or initiator.get("id"),
-            initiator["first_name"]
-        )
+        return "@{} ({})".format(initiator.get("username") or initiator.get("id"), initiator["first_name"])
 
     def to_dict(self):
         data = {
@@ -139,7 +130,7 @@ class Game:
             "revealed": self.revealed,
             "votes": {user_id: vote.to_dict() for user_id, vote in self.votes.items()},
         }
-        
+
         # Корректный расчет среднего
         numeric_votes = []
         for vote in self.votes.values():
@@ -148,12 +139,12 @@ class Game:
                     numeric_votes.append(float(vote.point))
             except ValueError:
                 continue
-        
+
         if numeric_votes:
             data["average"] = sum(numeric_votes) / len(numeric_votes)
         else:
             data["average"] = 0
-            
+
         return data
 
     @classmethod
@@ -165,6 +156,7 @@ class Game:
         res.reply_message_id = dct["reply_message_id"]
         return res
 
+
 class GameRegistry:
     def __init__(self):
         self._db = None
@@ -173,7 +165,7 @@ class GameRegistry:
         self._db = await aiosqlite.connect(db_path)
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS games (
-                chat_id, game_id, 
+                chat_id, game_id,
                 json_data,
                 PRIMARY KEY (chat_id, game_id)
             )
@@ -184,7 +176,7 @@ class GameRegistry:
         return Game(chat_id, incoming_message_id, initiator, text)
 
     async def get_game(self, chat_id, incoming_message_id: str) -> Game:
-        query = 'SELECT json_data FROM games WHERE chat_id = ? AND game_id = ?'
+        query = "SELECT json_data FROM games WHERE chat_id = ? AND game_id = ?"
         async with self._db.execute(query, (chat_id, incoming_message_id)) as cursor:
             res = await cursor.fetchone()
             if not res:
@@ -193,7 +185,11 @@ class GameRegistry:
 
     async def save_game(self, game: Game):
         await self._db.execute(
-            "INSERT OR REPLACE INTO games VALUES (?, ?, ?)",
-            (game.chat_id, game.vote_id, json.dumps(game.to_dict()))
+            "INSERT OR REPLACE INTO games VALUES (?, ?, ?)", (game.chat_id, game.vote_id, json.dumps(game.to_dict()))
         )
         await self._db.commit()
+
+    async def close(self):
+        if self._db is not None:
+            await self._db.close()
+            self._db = None
