@@ -101,11 +101,14 @@ const confirmDialog = new ConfirmManager();
 // ==================== JIRA STATE ====================
 let jiraSettings = JSON.parse(localStorage.getItem('pp_jira_settings') || '{}');
 let jiraIssues = [];          // все задачи (включая эпики)
-let jiraEpics = [];           // только эпики
+let jiraEpics = [];           // только эпики (для совместимости)
 let jiraSelectedIssue = null;
 let jiraEpicLinkField = '';   // customfield_ID для связи с эпиком
 let jiraConnected = false;     // флаг успешного подключения к Jira
 let jiraAutoConnecting = false;// идёт автоподключение
+let epicMap = {};             // маппинг ключ эпика -> имя эпика
+let currentJiraIssue = null;  // текущая задача из Jira {key, summary, description, url}
+let currentTaskText = '';     // текущий текст задачи (для не-Jira задач)
 
 let _jiraMsgId = 0;
 const _jiraPending = new Map();
@@ -256,9 +259,17 @@ async function jiraTestConnection() {
         const fieldsResp = await jiraSendMessage({ type: 'getFields', jiraUrl: url, jiraToken: token });
         if (fieldsResp.ok) {
             jiraPopulateFieldSelect(fieldsResp.fields);
-            const epicLinkField = fieldsResp.fields.find(f =>
+            // Ищем поле Epic Link по нескольким критериям
+            let epicLinkField = fieldsResp.fields.find(f =>
                 f.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link'
             );
+            // Альтернативный поиск по имени
+            if (!epicLinkField) {
+                epicLinkField = fieldsResp.fields.find(f =>
+                    f.name?.toLowerCase() === 'epic link' || f.name?.toLowerCase() === 'epic-link'
+                );
+            }
+            console.log('[Jira] Found epicLinkField:', epicLinkField ? epicLinkField.id + ' (' + epicLinkField.name + ')' : 'NOT FOUND');
             jiraEpicLinkField = epicLinkField ? epicLinkField.id : '';
             // Сохраняем найденные поля
             jiraSettings.epicLinkField = jiraEpicLinkField;
@@ -286,7 +297,9 @@ function jiraPopulateFieldSelect(fields) {
     const storyFields = fields.filter(f =>
         f.name.toLowerCase().includes('story point') ||
         f.name.toLowerCase().includes('story point estimate') ||
-        f.name.toLowerCase().includes('оценка')
+        f.name.toLowerCase().includes('оценка') ||
+        f.name.toLowerCase().includes('estimate') ||
+        f.name.toLowerCase().includes('estimation')
     );
     const select = document.getElementById('jiraFieldSelect');
     if (!select) return;
@@ -490,18 +503,27 @@ function renderJiraJoinTree() {
         return;
     }
 
+    // Используем глобальный epicMap из jiraLoadIssues
+    console.log('[Jira] renderJiraJoinTree - epicMap:', epicMap);
+
     // Группируем по полю Epic Link (не требуем отдельного списка эпиков)
     const groups = {};
     for (const issue of jiraIssues) {
         if (issue.fields?.issuetype?.name === 'Epic') continue;
         let epicKey = null;
         if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-            epicKey = issue.fields[jiraEpicLinkField];
-            if (typeof epicKey === 'object' && epicKey.key) epicKey = epicKey.key;
-            else if (typeof epicKey === 'string') epicKey = epicKey.trim();
+            const epicLinkValue = issue.fields[jiraEpicLinkField];
+            if (typeof epicLinkValue === 'object') {
+                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
+                epicKey = epicLinkValue.key;
+            } else if (typeof epicLinkValue === 'string') {
+                epicKey = epicLinkValue.trim();
+            }
         }
         if (!epicKey) epicKey = '__no_epic__';
-        if (!groups[epicKey]) groups[epicKey] = { children: [] };
+        if (!groups[epicKey]) {
+            groups[epicKey] = { children: [] };
+        }
         groups[epicKey].children.push(issue);
     }
 
@@ -515,7 +537,11 @@ function renderJiraJoinTree() {
     for (const groupKey of groupKeys) {
         const group = groups[groupKey];
         const isNoEpic = groupKey === '__no_epic__';
-        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${groupKey}: ${escapeHtml(group.epic?.fields?.summary || '')}`;
+        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
+        const epicName = epicMap[groupKey];
+        const groupLabel = isNoEpic 
+            ? '📋 Без эпика' 
+            : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
         html += `<div class="jira-tree-group">`;
         html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
                     <span class="jira-tree-toggle">▶</span>
@@ -579,9 +605,14 @@ async function jiraLoadIssues() {
     const jql = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC';
     const { jiraUrl, jiraToken } = jiraSettings;
 
+    console.log('[Jira] jiraEpicLinkField:', jiraEpicLinkField || '(not set)');
+
+    // Пробуем получить имя эпика сразу через специальные поля
     let additionalFields = 'summary,description,issuetype,priority,project,issuelinks';
     if (jiraEpicLinkField) {
         additionalFields += ',' + jiraEpicLinkField;
+        // Пробуем добавить поля эпика (работает в Jira Software)
+        additionalFields += ',epic-name,epic-color';
     }
 
     console.log('[Jira] JQL filter used:', jql);
@@ -598,20 +629,100 @@ async function jiraLoadIssues() {
 
     console.log('[Jira] searchIssues response:', resp.ok ? `OK (${(resp.issues || []).length} issues)` : `ERROR: ${resp.error}`);
 
-    let epicIssues = [];
+    if (!resp.ok) {
+        btn.disabled = false;
+        btn.textContent = '🔄 ЗАГРУЗИТЬ ЗАДАЧИ';
+        statusEl.className = 'jira-status err';
+        statusEl.textContent = `❌ ${resp.error}`;
+        jiraIssues = [];
+        jiraEpics = [];
+        epicMap = {};
+        renderJiraIssueTree();
+        renderJiraJoinTree();
+        showJiraJoinTree();
+        return;
+    }
+
+    // Собираем уникальные ключи эпиков
+    const epicKeys = new Set();
     if (jiraEpicLinkField) {
+        for (const issue of resp.issues) {
+            const epicLinkValue = issue.fields?.[jiraEpicLinkField];
+            if (epicLinkValue) {
+                const epicKey = typeof epicLinkValue === 'string' ? epicLinkValue : (epicLinkValue?.key || '');
+                if (epicKey) {
+                    epicKeys.add(epicKey);
+                }
+            }
+        }
+    }
+    console.log('[Jira] Unique epic keys:', Array.from(epicKeys));
+
+    // Запрашиваем ВСЕ эпики ОДИН РАЗ через key in (...)
+    epicMap = {};
+    const epicKeysList = Array.from(epicKeys);
+    
+    if (epicKeysList.length > 0) {
+        // Формируем JQL: key in ("E077-6863", "E077-1234", ...)
+        const epicJql = `key in (${epicKeysList.map(k => `"${k}"`).join(', ')})`;
+        console.log('[Jira] Fetching all epics in ONE request:', epicJql);
+        
         const epicResp = await jiraSendMessage({
             type: 'searchIssues',
             jiraUrl,
             jiraToken,
-            jql: 'issuetype = Epic ORDER BY updated DESC',
-            maxResults: 50,
-            fields: 'summary,description,issuetype,priority,project',
+            jql: epicJql,
+            maxResults: 100,
+            fields: 'summary,issuetype'
         });
-        if (epicResp.ok) {
-            epicIssues = epicResp.issues || [];
+        
+        if (epicResp.ok && epicResp.issues) {
+            for (const epic of epicResp.issues) {
+                const summary = epic.fields?.summary || epic.key;
+                epicMap[epic.key] = summary;
+                console.log('[Jira] Epic', epic.key, '->', summary);
+            }
         }
-        console.log('[Jira] epics response:', epicResp.ok ? `OK (${(epicResp.issues || []).length} epics)` : `ERROR: ${epicResp.error}`);
+        
+        // Для эпиков, которые не нашлись, используем ключ
+        for (const epicKey of epicKeysList) {
+            if (!epicMap[epicKey]) {
+                epicMap[epicKey] = epicKey;
+                console.log('[Jira] Epic NOT FOUND, using key:', epicKey);
+            }
+        }
+    }
+    console.log('[Jira] Final epicMap:', epicMap);
+
+    let epicIssues = [];
+
+    if (resp.ok && resp.issues && resp.issues.length > 0) {
+        // Выводим структуру первой задачи для отладки
+        console.log('[Jira] FIRST ISSUE FULL STRUCTURE:');
+        console.log(JSON.stringify(resp.issues[0], null, 2));
+        
+        // Показываем конкретные поля
+        const firstIssue = resp.issues[0];
+        console.log('[Jira] Issue key:', firstIssue.key);
+        console.log('[Jira] Issue summary:', firstIssue.fields?.summary);
+        console.log('[Jira] Issue fields keys:', Object.keys(firstIssue.fields || {}));
+        
+        if (jiraEpicLinkField) {
+            console.log('[Jira] Epic Link field ID:', jiraEpicLinkField);
+            console.log('[Jira] Epic Link value:', firstIssue.fields?.[jiraEpicLinkField]);
+            console.log('[Jira] epic-name value:', firstIssue.fields?.['epic-name']);
+        }
+        
+        // Показываем все задачи с их epic-name
+        console.log('[Jira] All issues with epic info:');
+        resp.issues.forEach(issue => {
+            console.log(`  ${issue.key}:`, {
+                summary: issue.fields?.summary,
+                epicLink: issue.fields?.[jiraEpicLinkField],
+                epicName: issue.fields?.['epic-name'],
+                type: issue.fields?.issuetype?.name
+            });
+        });
     }
 
     btn.disabled = false;
@@ -669,12 +780,12 @@ function renderJiraIssueTree() {
         if (issue.fields?.issuetype?.name === 'Epic') continue;
         let epicKey = null;
         if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-            epicKey = issue.fields[jiraEpicLinkField];
-            // Может быть объектом { key: "PROJ-123" } или строкой "Название эпика"
-            if (typeof epicKey === 'object' && epicKey.key) {
-                epicKey = epicKey.key;
-            } else if (typeof epicKey === 'string') {
-                epicKey = epicKey.trim();
+            const epicLinkValue = issue.fields[jiraEpicLinkField];
+            if (typeof epicLinkValue === 'object') {
+                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
+                epicKey = epicLinkValue.key;
+            } else if (typeof epicLinkValue === 'string') {
+                epicKey = epicLinkValue.trim();
             }
         }
         if (!epicKey) {
@@ -685,6 +796,8 @@ function renderJiraIssueTree() {
         }
         groups[epicKey].children.push(issue);
     }
+
+    // Используем глобальный epicMap
 
     const priorityMap = { 'Highest': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Lowest': 4 };
     function priorityOrder(name) { return priorityMap[name] ?? 3; }
@@ -699,7 +812,11 @@ function renderJiraIssueTree() {
     for (const groupKey of groupKeys) {
         const group = groups[groupKey];
         const isNoEpic = groupKey === '__no_epic__';
-        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${escapeHtml(groupKey)}`;
+        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
+        const epicName = epicMap[groupKey];
+        const groupLabel = isNoEpic 
+            ? '📋 Без эпика' 
+            : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
         html += `<div class="jira-tree-group">`;
         html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
                     <span class="jira-tree-toggle">▶</span>
@@ -808,6 +925,8 @@ function parseJiraIssueLinks(issue) {
                 key: link.inwardIssue.key,
                 summary: link.inwardIssue.fields?.summary || '',
                 direction: type.inward || 'relates to',
+                status: link.inwardIssue.fields?.status?.name || '',
+                duedate: link.inwardIssue.fields?.duedate || '',
             });
         }
         if (link.outwardIssue && link.outwardIssue.key !== issue.key) {
@@ -815,10 +934,69 @@ function parseJiraIssueLinks(issue) {
                 key: link.outwardIssue.key,
                 summary: link.outwardIssue.fields?.summary || '',
                 direction: type.outward || 'relates to',
+                status: link.outwardIssue.fields?.status?.name || '',
+                duedate: link.outwardIssue.fields?.duedate || '',
             });
         }
     }
     return result;
+}
+
+function formatLinkedIssues(linked, jiraBaseUrl) {
+    if (!linked || linked.length === 0) return '';
+    
+    const baseUrl = jiraBaseUrl || jiraSettings?.jiraUrl || '';
+    
+    // Группируем по типу связи
+    const groups = {};
+    for (const link of linked) {
+        const dir = link.direction || 'relates to';
+        if (!groups[dir]) groups[dir] = [];
+        groups[dir].push(link);
+    }
+    
+    // Цвета для статусов (Jira-like)
+    const statusColors = {
+        'done': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', border: 'rgba(74,222,128,0.3)' },
+        'closed': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', border: 'rgba(74,222,128,0.3)' },
+        'resolved': { bg: 'rgba(74,222,128,0.15)', text: '#4ade80', border: 'rgba(74,222,128,0.3)' },
+        'in progress': { bg: 'rgba(96,165,250,0.15)', text: '#60a5fa', border: 'rgba(96,165,250,0.3)' },
+        'in review': { bg: 'rgba(251,191,36,0.15)', text: '#fbbf24', border: 'rgba(251,191,36,0.3)' },
+        'open': { bg: 'rgba(192,132,252,0.15)', text: '#c084fc', border: 'rgba(192,132,252,0.3)' },
+        'to do': { bg: 'rgba(156,163,175,0.1)', text: '#9ca3af', border: 'rgba(156,163,175,0.2)' },
+        'backlog': { bg: 'rgba(107,114,128,0.1)', text: '#6b7280', border: 'rgba(107,114,128,0.2)' },
+    };
+    function getStatusColors(status) {
+        return statusColors[(status || '').toLowerCase()] || { bg: 'var(--bg-input)', text: 'var(--text-secondary)', border: 'var(--border)' };
+    }
+    
+    let html = '<div style="margin-top: 8px; border-top: 1px solid var(--border);">';
+    html += '<div style="font-size: 0.8em; color: var(--text-secondary); padding: 6px 0 4px; letter-spacing: 1px; text-transform: uppercase;">🔄 Связанные задачи</div>';
+    html += '<div style="max-height: 120px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; padding-right: 4px;">';
+    
+    for (const [direction, items] of Object.entries(groups)) {
+        html += `<div style="margin: 2px 0 1px; font-size: 0.75em; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.8;">${escapeHtml(direction)}</div>`;
+        for (const item of items) {
+            const linkUrl = baseUrl ? `${baseUrl}/browse/${item.key}` : '#';
+            const sc = getStatusColors(item.status);
+            
+            let dateHtml = '';
+            if (item.duedate) {
+                const isOverdue = item.duedate && new Date(item.duedate) < new Date() && item.status?.toLowerCase() !== 'done' && item.status?.toLowerCase() !== 'closed';
+                dateHtml = `<span style="font-size: 0.8em; color: ${isOverdue ? '#ef4444' : 'var(--text-secondary)'}; flex-shrink: 0;">${isOverdue ? '⚠ ' : '📅 '}${item.duedate}</span>`;
+            }
+            
+            html += `<div style="display: flex; align-items: center; gap: 5px; padding: 2px 0;">
+                <a href="${linkUrl}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; font-family: var(--font-mono); font-size: 0.85em; flex-shrink: 0;">${escapeHtml(item.key)}</a>
+                <span style="color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85em; min-width: 0;">${escapeHtml(item.summary)}</span>
+                ${item.status ? `<span style="display: inline-block; padding: 1px 8px; border-radius: 3px; font-size: 0.78em; font-weight: 600; flex-shrink: 0; background: ${sc.bg}; color: ${sc.text}; border: 1px solid ${sc.border};">${escapeHtml(item.status)}</span>` : ''}
+                ${dateHtml}
+            </div>`;
+        }
+    }
+    
+    html += '</div></div>';
+    return html;
 }
 
 function formatJiraDescription(text) {
@@ -906,16 +1084,15 @@ async function jiraSendEstimate() {
         return;
     }
 
-    if (!jiraSelectedIssue) {
-        toggleJiraPanel();
-        if (jiraIssues.length === 0) {
-            await jiraLoadIssues();
-        }
+    if (!jiraSelectedIssue && !currentJiraIssue?.key) return;
+    const issueKey = jiraSelectedIssue || currentJiraIssue.key;
+
+    const rawValue = document.getElementById('resultValue').textContent.trim();
+    const value = parseFloat(rawValue);
+    if (isNaN(value) || value <= 0) {
+        toast.warning('Введите корректное число в поле результата');
         return;
     }
-
-    const value = Math.ceil(parseFloat(document.getElementById('resultValue').textContent));
-    if (!value || value <= 0) return;
 
     const btn = document.getElementById('jiraSendBtn');
     btn.classList.add('sending');
@@ -925,7 +1102,7 @@ async function jiraSendEstimate() {
         type: 'setEstimate',
         jiraUrl: jiraSettings.jiraUrl,
         jiraToken: jiraSettings.jiraToken,
-        issueKey: jiraSelectedIssue,
+        issueKey: issueKey,
         fieldId: jiraSettings.storyPointsField,
         value,
     });
@@ -934,17 +1111,25 @@ async function jiraSendEstimate() {
     btn.textContent = '⚡ ОТПРАВИТЬ В JIRA';
 
     if (resp.ok) {
-        toast.success(`Оценка ${value} отправлена в ${jiraSelectedIssue}`, 'JIRA');
-        jiraSendMessage({
-            type: 'addComment',
-            jiraUrl: jiraSettings.jiraUrl,
-            jiraToken: jiraSettings.jiraToken,
-            issueKey: jiraSelectedIssue,
-            comment: `Planning Poker: оценка команды = ${value} (задача: ${document.getElementById('taskDisplay').textContent})`,
-        });
+        toast.success(`Оценка ${value} отправлена в ${issueKey}`, 'JIRA');
         setTimeout(() => jiraLoadIssues(), 2000);
     } else {
-        toast.error(resp.error || 'Ошибка отправки в Jira', 'JIRA');
+        const errMsg = typeof resp.error === 'string' ? resp.error : JSON.stringify(resp.error);
+        // Если ошибка про поле, подсказываем пользователю
+        if (errMsg.includes('cannot be set') || errMsg.includes('not on the appropriate screen')) {
+            toast.error(
+                `Поле Story Points (${jiraSettings.storyPointsField}) недоступно для этой задачи. Выберите другое поле в ⚡ JIRA`,
+                'JIRA'
+            );
+            // Открываем панель Jira чтобы пользователь мог выбрать поле
+            if (document.getElementById('jiraPanel').classList.contains('hidden')) {
+                toggleJiraPanel();
+            }
+            document.getElementById('jiraFieldGroup').style.display = 'block';
+        } else {
+            toast.error(errMsg || 'Ошибка отправки в Jira', 'JIRA');
+        }
+        console.error('[Jira] Send estimate error:', resp);
     }
 }
 
@@ -954,56 +1139,96 @@ let _newTaskModalSelected = null;
 function openNewTaskModal() {
     const modal = document.getElementById('newTaskModal');
     if (!modal) return;
-    modal.classList.remove('hidden');
-    _newTaskModalSelected = null;
-    document.getElementById('newTaskApplyBtn').disabled = true;
+    
+    // Обновляем данные задач перед открытием
+    jiraLoadIssues().then(() => {
+        modal.classList.remove('hidden');
+        _newTaskModalSelected = null;
+        document.getElementById('newTaskApplyBtn').disabled = true;
 
-    // Рендерим дерево
-    const treeContainer = document.getElementById('newTaskTree');
-    if (!treeContainer) return;
+        // Рендерим дерево (такой же вид как на экране подключения)
+        const treeContainer = document.getElementById('newTaskTree');
+        if (!treeContainer) return;
 
-    // Используем тот же рендерер, что и в панели, но с кастомным селектором
-    renderJiraTreeInContainer(treeContainer, (key) => {
-        _newTaskModalSelected = key;
-        document.getElementById('newTaskApplyBtn').disabled = false;
-        // Показываем превью
-        const issue = jiraIssues.find(i => i.key === key);
-        if (issue) {
-            const preview = document.getElementById('newTaskPreview');
-            const summary = issue.fields?.summary || '';
-            const description = issue.fields?.description || '';
-            const url = `${jiraSettings.jiraUrl}/browse/${key}`;
-            const linked = parseJiraIssueLinks(issue);
-
-            let linkedHtml = '';
-            if (linked.length > 0) {
-                linkedHtml = '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px;">' +
-                    linked.map(l => {
-                        const linkUrl = `${jiraSettings.jiraUrl}/browse/${l.key}`;
-                        return `<div style="display:flex;align-items:center;gap:4px;font-size:0.85em;padding:2px 0;">
-                            <span style="opacity:0.6;font-size:0.85em;">${escapeHtml(l.direction)}</span>
-                            <a href="${linkUrl}" target="_blank" style="color:var(--accent);font-weight:600;">${escapeHtml(l.key)}</a>
-                            <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.summary)}</span>
-                        </div>`;
-                    }).join('') + '</div>';
-            }
-
-            preview.innerHTML = `
-                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-                    <a href="${url}" target="_blank" style="color:var(--accent);font-weight:700;font-size:1.1em;">${escapeHtml(key)}</a>
-                    <span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(summary)}</span>
-                </div>
-                ${description ? `<div style="color:var(--text-secondary);font-size:0.9em;line-height:1.5;max-height:80px;overflow-y:auto;">${formatJiraDescription(description)}</div>` : ''}
-                ${linkedHtml}
-            `;
-            preview.style.display = 'block';
+        if (jiraIssues.length === 0) {
+            treeContainer.innerHTML = '<div class="jira-tree-empty">Нет задач. Нажмите 🔄 ОБНОВИТЬ</div>';
+            return;
         }
-    });
 
-    setTimeout(() => {
-        const firstItem = treeContainer.querySelector('.jira-tree-item');
-        if (firstItem) firstItem.click();
-    }, 100);
+        // Используем epicMap из jiraLoadIssues
+        const groups = {};
+        for (const issue of jiraIssues) {
+            if (issue.fields?.issuetype?.name === 'Epic') continue;
+            let epicKey = null;
+            if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+                const epicLinkValue = issue.fields[jiraEpicLinkField];
+                if (typeof epicLinkValue === 'object') {
+                    epicKey = epicLinkValue.key;
+                } else if (typeof epicLinkValue === 'string') {
+                    epicKey = epicLinkValue.trim();
+                }
+            }
+            if (!epicKey) epicKey = '__no_epic__';
+            if (!groups[epicKey]) {
+                groups[epicKey] = { children: [] };
+            }
+            groups[epicKey].children.push(issue);
+        }
+
+        const groupKeys = Object.keys(groups).sort((a, b) => {
+            if (a === '__no_epic__') return 1;
+            if (b === '__no_epic__') return -1;
+            return 0;
+        });
+
+        let html = '';
+        for (const groupKey of groupKeys) {
+            const group = groups[groupKey];
+            const isNoEpic = groupKey === '__no_epic__';
+            const epicName = epicMap[groupKey];
+            const groupLabel = isNoEpic 
+                ? '📋 Без эпика' 
+                : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
+            html += `<div class="jira-tree-group">`;
+            html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
+                        <span class="jira-tree-toggle">▶</span>
+                        <span class="jira-tree-epic-label">${groupLabel}</span>
+                        <span class="jira-tree-count">${group.children.length}</span>
+                     </div>`;
+            html += `<div class="jira-tree-children">`;
+            for (const issue of group.children) {
+                const key = issue.key || '';
+                const summary = issue.fields?.summary || '';
+                html += `<div class="jira-tree-item" data-key="${key}" onclick="selectNewTaskTreeItem(this, '${key}')">
+                            <span class="jira-tree-item-key">${key}</span>
+                            <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
+                         </div>`;
+            }
+            html += `</div></div>`;
+        }
+        treeContainer.innerHTML = html;
+
+        // Раскрываем первую группу
+        const firstGroup = treeContainer.querySelector('.jira-tree-group');
+        if (firstGroup) {
+            firstGroup.querySelector('.jira-tree-children').classList.add('open');
+            firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+        }
+
+        // При клике на элемент
+        treeContainer.querySelectorAll('.jira-tree-item').forEach(el => {
+            el.addEventListener('dblclick', () => {
+                const key = el.dataset.key;
+                if (key) applyNewTaskFromModal();
+            });
+        });
+
+        // Автовыбор первого элемента
+        setTimeout(() => {
+            const firstItem = treeContainer.querySelector('.jira-tree-item');
+            if (firstItem) firstItem.click();
+        }, 100);
+    });
 }
 
 function closeNewTaskModal() {
@@ -1034,10 +1259,47 @@ async function applyNewTaskFromModal() {
     const issue = jiraIssues.find(i => i.key === _newTaskModalSelected);
     if (!issue) return;
 
+    const key = issue.key;
     const summary = issue.fields?.summary || '';
-    const newText = `[${_newTaskModalSelected}] ${summary}`;
+    const description = issue.fields?.description || '';
+    const jiraUrl = jiraSettings.jiraUrl;
+    const linked = parseJiraIssueLinks(issue);
+    
+    // Получаем ключ эпика
+    let epicKey = '';
+    if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+        const ev = issue.fields[jiraEpicLinkField];
+        epicKey = typeof ev === 'string' ? ev : (ev?.key || '');
+    }
+    
+    // Сохраняем информацию о задаче
+    currentJiraIssue = {
+        key: key,
+        epicKey: epicKey,
+        summary: summary,
+        description: description,
+        url: `${jiraUrl}/browse/${key}`,
+        linked: linked
+    };
+    
+    // Устанавливаем выбранную задачу для отправки в Jira
+    jiraSelectedIssue = key;
+
     closeNewTaskModal();
 
+    // Формируем JSON для передачи всем участникам через сервер
+    const jiraData = JSON.stringify({
+        type: 'jira',
+        key: key,
+        epicKey: epicKey,
+        summary: summary,
+        description: description,
+        url: currentJiraIssue.url,
+        jiraUrl: jiraUrl,
+        linked: linked
+    });
+    const newText = `__JIRA__${jiraData}`;
+    
     // Обновляем taskDisplay и сбрасываем голосование
     await restartSession(newText);
 }
@@ -1049,6 +1311,9 @@ function renderJiraTreeInContainer(container, onSelect) {
         return;
     }
 
+    // Используем глобальный epicMap
+    console.log('[Jira] renderJiraTreeInContainer - epicMap:', epicMap);
+
     const groups = {};
     for (const epic of jiraEpics) {
         groups[epic.key] = { epic, children: [] };
@@ -1057,11 +1322,18 @@ function renderJiraTreeInContainer(container, onSelect) {
         if (issue.fields?.issuetype?.name === 'Epic') continue;
         let epicKey = null;
         if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-            epicKey = issue.fields[jiraEpicLinkField];
-            if (typeof epicKey === 'object' && epicKey.key) epicKey = epicKey.key;
+            const epicLinkValue = issue.fields[jiraEpicLinkField];
+            if (typeof epicLinkValue === 'object') {
+                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
+                epicKey = epicLinkValue.key;
+            } else if (typeof epicLinkValue === 'string') {
+                epicKey = epicLinkValue.trim();
+            }
         }
         if (!epicKey || !groups[epicKey]) epicKey = '__no_epic__';
-        if (!groups[epicKey]) groups[epicKey] = { epic: null, children: [] };
+        if (!groups[epicKey]) {
+            groups[epicKey] = { epic: null, children: [] };
+        }
         groups[epicKey].children.push(issue);
     }
 
@@ -1075,7 +1347,11 @@ function renderJiraTreeInContainer(container, onSelect) {
     for (const groupKey of groupKeys) {
         const group = groups[groupKey];
         const isNoEpic = groupKey === '__no_epic__';
-        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${groupKey}: ${escapeHtml(group.epic?.fields?.summary || '')}`;
+        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
+        const epicName = epicMap[groupKey];
+        const groupLabel = isNoEpic 
+            ? '📋 Без эпика' 
+            : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
         html += `<div class="jira-tree-group">`;
         html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
                     <span class="jira-tree-toggle">▶</span>
@@ -1631,6 +1907,128 @@ function formatTaskText(text) {
     return text.replace(urlRegex, url => `<a href="${url}" target="_blank" style="color: var(--accent); text-decoration: underline; word-break: break-all;">${url}</a>`);
 }
 
+function formatJiraDescription(desc) {
+    if (!desc) return '';
+    
+    // Экранируем HTML
+    let html = escapeHtml(desc);
+    
+    // Jira ссылки [текст|url] → <a href="url">текст</a>
+    const jiraBaseUrl = jiraSettings?.jiraUrl || '';
+    html = html.replace(/\[([^|]+?)\|([^\]\n]+?)\]/g, (_, text, url) => {
+        const href = url.match(/^https?:\/\//) ? url : (jiraBaseUrl ? `${jiraBaseUrl}${url.startsWith('/') ? '' : '/'}${url}` : url);
+        return `<a href="${href}" target="_blank" class="jira-desc-link">${text.trim()}</a>`;
+    });
+    
+    // Jira ссылки на задачи [PROJ-123]
+    if (jiraBaseUrl) {
+        html = html.replace(/\[([A-Z]{2,6}-\d+)\]/g, (_, key) =>
+            `<a href="${jiraBaseUrl}/browse/${key}" target="_blank" class="jira-desc-link">${key}</a>`
+        );
+        html = html.replace(/\b([A-Z]{2,6}-\d+)\b/g, (_, key) =>
+            `<a href="${jiraBaseUrl}/browse/${key}" target="_blank" class="jira-desc-link">${key}</a>`
+        );
+    }
+    
+    // Обычные URL — только если не внутри href="..." (проверяем контекст)
+    html = html.replace(/(^|[\s(\[,;:>!?])(https?:\/\/[^\s<>\])"]+)/g, (_, before, url) =>
+        `${before}<a href="${url}" target="_blank" class="jira-desc-link">${url}</a>`
+    );
+    
+    // Переносы строк
+    html = html.replace(/\n/g, '<br>');
+    
+    return html;
+}
+
+function updateTaskDisplay() {
+    const taskDisplay = document.getElementById('taskDisplay');
+    const jiraTaskLink = document.getElementById('jiraTaskLink');
+    const jiraTaskLinkUrl = document.getElementById('jiraTaskLinkUrl');
+    const epicMeta = document.getElementById('epicMeta');
+    const epicLinkUrl = document.getElementById('epicLinkUrl');
+    if (!taskDisplay) return;
+    
+    // Если есть задача из Jira
+    if (currentJiraIssue) {
+        const { key, epicKey, summary, description, url } = currentJiraIssue;
+        
+        // Показываем ссылку на задачу в заголовке
+        if (jiraTaskLink && jiraTaskLinkUrl) {
+            jiraTaskLink.style.display = 'inline';
+            jiraTaskLinkUrl.textContent = key;
+            jiraTaskLinkUrl.href = url;
+        }
+        
+        // Показываем ссылку на эпик в заголовке
+        if (epicMeta && epicLinkUrl) {
+            if (epicKey) {
+                epicMeta.style.display = 'inline-flex';
+                epicLinkUrl.textContent = epicKey;
+                epicLinkUrl.href = `${currentJiraIssue.jiraUrl || jiraSettings.jiraUrl || ''}/browse/${epicKey}`;
+            } else {
+                epicMeta.style.display = 'none';
+            }
+        }
+        
+        // Единый блок: summary + описание скроллятся, связанные задачи прижаты к низу
+        const linkedHtml = formatLinkedIssues(currentJiraIssue.linked, currentJiraIssue.jiraUrl);
+        const taskHtml = `
+            <div style="flex: 1; overflow-y: auto; min-height: 0; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--border) transparent;">
+                ${summary ? `<div style="font-weight: 500; margin-bottom: ${description ? '6px' : '0'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-size: 0.95em;">${escapeHtml(summary)}</div>` : ''}
+                ${description ? `<div class="jira-description" style="color: var(--text-primary); font-size: 0.95em;">${formatJiraDescription(description)}</div>` : ''}
+            </div>
+            ${linkedHtml}
+        `;
+        
+        taskDisplay.innerHTML = taskHtml;
+    } else {
+        // Обычный текст задачи (не Jira)
+        if (jiraTaskLink) {
+            jiraTaskLink.style.display = 'none';
+        }
+        if (epicMeta) {
+            epicMeta.style.display = 'none';
+        }
+        taskDisplay.innerHTML = formatTaskText(currentTaskText);
+    }
+}
+
+async function loadJiraIssueDescription(issueKey) {
+    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) return;
+    
+    // Проверяем, есть ли уже описание в кэше задач
+    const cachedIssue = jiraIssues.find(i => i.key === issueKey);
+    if (cachedIssue?.fields?.description && currentJiraIssue && currentJiraIssue.key === issueKey) {
+        currentJiraIssue.description = cachedIssue.fields.description;
+        updateTaskDisplay();
+        console.log('[Jira] Description from cache for', issueKey);
+        return;
+    }
+    
+    try {
+        const resp = await jiraSendMessage({
+            type: 'searchIssues',
+            jiraUrl: jiraSettings.jiraUrl,
+            jiraToken: jiraSettings.jiraToken,
+            jql: `key = "${issueKey}"`,
+            maxResults: 1,
+            fields: 'description'
+        });
+        
+        if (resp.ok && resp.issues && resp.issues.length > 0) {
+            const description = resp.issues[0].fields?.description || '';
+            if (description && currentJiraIssue && currentJiraIssue.key === issueKey) {
+                currentJiraIssue.description = description;
+                updateTaskDisplay();
+                console.log('[Jira] Loaded description for', issueKey);
+            }
+        }
+    } catch (error) {
+        console.error('[Jira] Error loading description:', error);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     updateSoundButton();
@@ -1721,6 +2119,64 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    
+    // Редактируемый результат: при изменении значения обновляем кнопку Jira
+    const resultValue = document.getElementById('resultValue');
+    if (resultValue) {
+        resultValue.addEventListener('input', () => {
+            // Разрешаем только цифры, точку и запятую
+            let val = resultValue.textContent.trim();
+            // Заменяем запятую на точку
+            val = val.replace(',', '.');
+            // Удаляем всё кроме цифр, точки и минуса
+            val = val.replace(/[^\d.-]/g, '');
+            // Оставляем только одну точку
+            const dotIndex = val.indexOf('.');
+            if (dotIndex !== -1) {
+                const beforeDot = val.substring(0, dotIndex + 1);
+                const afterDot = val.substring(dotIndex + 1).replace(/\./g, '');
+                // Не больше одного знака после точки
+                val = beforeDot + afterDot.substring(0, 1);
+            }
+            resultValue.textContent = val;
+            
+            const btn = document.getElementById('jiraSendBtn');
+            if (btn && btn.style.display !== 'none') {
+                btn.textContent = val ? `⚡ ${val} → JIRA` : '⚡ В JIRA';
+            }
+            
+            // Перемещаем курсор в конец
+            const range = document.createRange();
+            const sel = window.getSelection();
+            range.selectNodeContents(resultValue);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+        });
+        resultValue.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                resultValue.blur();
+            }
+        });
+        resultValue.addEventListener('blur', () => {
+            let val = resultValue.textContent.trim().replace(',', '.');
+            if (!val) {
+                resultValue.textContent = resultValue.dataset.lastValid || '0';
+                return;
+            }
+            const num = parseFloat(val);
+            if (isNaN(num) || num < 0) {
+                resultValue.textContent = resultValue.dataset.lastValid || '0';
+                toast.warning('Введите положительное число');
+                return;
+            }
+            // Округляем до десятых
+            const rounded = Math.round(num * 10) / 10;
+            resultValue.textContent = rounded;
+            resultValue.dataset.lastValid = String(rounded);
+        });
+    }
 });
 
 async function joinOrCreateSession() {
@@ -1829,6 +2285,9 @@ function connectWebSocket(sessionId) {
     
     state.ws.onmessage = (event) => {
         try {
+            // Пропускаем pong ответы (не JSON)
+            if (event.data === 'pong') return;
+            
             const message = JSON.parse(event.data);
             
             // ✅ НОВОЕ: Обработка входа/выхода участников
@@ -1888,30 +2347,62 @@ function updateSessionDisplay(session) {
         state.wasRevealed = false;
     }
 
-    // Если задача начинается с [TASK-123] — рендерим как ссылку на Jira
+    // Парсим данные задачи (JSON от Jira или старый формат [KEY] Summary)
     const taskText = session.text || '';
-    const jiraMatch = taskText.match(/^\[([A-Z]+-\d+)\]\s*(.*)/);
-    if (jiraMatch && jiraSettings.jiraUrl) {
-        const key = jiraMatch[1];
-        const summary = jiraMatch[2];
-        const issueUrl = `${jiraSettings.jiraUrl}/browse/${key}`;
-        document.getElementById('taskDisplay').innerHTML = `
-            <a href="${issueUrl}" target="_blank" class="task-jira-link">${escapeHtml(key)}</a>
-            ${escapeHtml(summary)}
-        `;
-        const cachedIssue = jiraIssues.find(i => i.key === key);
-        if (cachedIssue?.fields?.description) {
-            updateTaskDescriptionWithJira(cachedIssue.fields.description, parseJiraIssueLinks(cachedIssue));
-        } else if (cachedIssue) {
-            const linked = parseJiraIssueLinks(cachedIssue);
-            if (linked.length > 0) {
-                updateTaskDescriptionWithJira('', linked);
+    currentTaskText = taskText;
+    let isJiraTask = false;
+    
+    if (taskText.startsWith('__JIRA__')) {
+        try {
+            const jiraData = JSON.parse(taskText.slice(8));
+            currentJiraIssue = {
+                key: jiraData.key,
+                epicKey: jiraData.epicKey || '',
+                summary: jiraData.summary || '',
+                description: jiraData.description || '',
+                url: jiraData.url || '#',
+                jiraUrl: jiraData.jiraUrl || '',
+                linked: jiraData.linked || []
+            };
+            isJiraTask = true;
+        } catch (e) {
+            console.error('[Jira] Failed to parse task JSON:', e);
+        }
+    }
+    
+    if (!isJiraTask) {
+        // Старый формат: [PROJ-123] Summary (backward compatibility)
+        const jiraMatch = taskText.match(/^\[([A-Z]+-\d+)\]\s*(.*)/s);
+        if (jiraMatch) {
+            const oldKey = jiraMatch[1];
+            let oldEpicKey = '';
+            // Пробуем найти эпик из кэша
+            const cachedIssue = jiraIssues.find(i => i.key === oldKey);
+            if (cachedIssue && jiraEpicLinkField && cachedIssue.fields?.[jiraEpicLinkField]) {
+                const ev = cachedIssue.fields[jiraEpicLinkField];
+                oldEpicKey = typeof ev === 'string' ? ev : (ev?.key || '');
             }
+            currentJiraIssue = {
+                key: oldKey,
+                epicKey: oldEpicKey,
+                summary: jiraMatch[2],
+                description: '',
+                url: jiraSettings.jiraUrl ? `${jiraSettings.jiraUrl}/browse/${oldKey}` : '#',
+                linked: []
+            };
+            isJiraTask = true;
+        }
+    }
+    
+    if (isJiraTask) {
+        updateTaskDisplay();
+        // Устанавливаем выбранную задачу для отправки в Jira
+        if (currentJiraIssue?.key) {
+            jiraSelectedIssue = currentJiraIssue.key;
         }
     } else {
-        document.getElementById('taskDisplay').innerHTML = formatTaskText(taskText);
-        const descEl = document.getElementById('taskJiraDesc');
-        if (descEl) descEl.style.display = 'none';
+        currentJiraIssue = null;
+        updateTaskDisplay();
     }
     document.getElementById('initiatorDisplay').textContent = session.initiator_name;
     document.getElementById('sessionIdDisplay').textContent = state.sessionId;
@@ -1945,13 +2436,24 @@ function updateSessionDisplay(session) {
         averageCard.style.display = 'block';
         document.getElementById('averageValue').textContent = session.average.toFixed(1);
         resultCard.style.display = 'block';
-        resultCard.style.cursor = 'pointer';
-        document.getElementById('resultValue').textContent = Math.ceil(session.average);
-        document.getElementById('resultLabel').textContent = 'НАЖМИТЕ, ЧТОБЫ СКОПИРОВАТЬ';
-        // Кнопка Jira — только если есть расширение
+        resultCard.style.cursor = 'default';
+        const resultVal = Math.round(Math.ceil(session.average) * 10) / 10;
+        document.getElementById('resultValue').textContent = resultVal;
+        document.getElementById('resultValue').dataset.lastValid = resultVal;
+        // Редактировать результат может только инициатор и только для Jira задач
+        const isJiraTask = !!currentJiraIssue?.key;
+        document.getElementById('resultValue').contentEditable = state.isInitiator && isJiraTask;
+        document.getElementById('resultLabel').textContent = state.isInitiator && isJiraTask ? 'КЛИК — ПРАВКА' : 'ИТОГ';
+        // Кнопка Jira — только для инициатора и если есть задача из Jira
         const jiraSendBtn = document.getElementById('jiraSendBtn');
-        if (hasJiraExt() && jiraSettings.jiraUrl && jiraSettings.jiraToken) {
-            jiraSendBtn.style.display = 'block';
+        const canSendToJira = state.isInitiator && isJiraTask && (
+            (hasJiraExt() && jiraSettings.jiraUrl && jiraSettings.jiraToken) ||
+            (currentJiraIssue.jiraUrl && jiraSettings.jiraToken)
+        );
+        if (canSendToJira) {
+            jiraSendBtn.style.display = 'inline-flex';
+            jiraSendBtn.textContent = `⚡ В JIRA`;
+            jiraSendBtn.title = `Отправить оценку в ${currentJiraIssue.key}`;
         } else {
             jiraSendBtn.style.display = 'none';
         }
@@ -1960,7 +2462,7 @@ function updateSessionDisplay(session) {
         averageCard.style.display = 'none';
         resultCard.style.display = 'none';
         resultCard.style.cursor = 'default';
-        document.getElementById('histogramCard').style.display = 'none';
+        document.getElementById('histogramContainer').innerHTML = '';
     }
     
     const totalConnected = session.participants ? session.participants.filter(p => p.online).length : 0;
@@ -2081,9 +2583,11 @@ function renderParticipants(session) {
 }
 
 function renderHistogram(session) {
-    const card = document.getElementById('histogramCard');
     const container = document.getElementById('histogramContainer');
-    if (!card || !container || !session.revealed) return;
+    if (!container || !session.revealed) {
+        if (container) container.innerHTML = '';
+        return;
+    }
 
     // Count votes per point value
     const counts = {};
@@ -2116,8 +2620,6 @@ function renderHistogram(session) {
             </div>
         `;
     }).join('');
-
-    card.style.display = 'block';
 }
 
 async function castVote(point) {
@@ -2208,6 +2710,9 @@ async function restartSession(newText = null) {
             toast.error(err.error || 'Неизвестная ошибка', 'НЕ УДАЛОСЬ');
             return;
         }
+        
+        // Обновляем отображение задачи (currentJiraIssue уже установлен в applyNewTaskFromModal)
+        updateTaskDisplay();
         
         soundManager.playReset();
         toast.info('Голосование перезапущено');

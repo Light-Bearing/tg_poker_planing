@@ -72,7 +72,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
       .then(r => {
         if (r.ok || r.status === 204) return { ok: true };
-        return r.json().then(e => Promise.reject(e.errors || e.errorMessages?.[0] || `HTTP ${r.status}`));
+        return r.json().then(e => {
+          let errMsg = '';
+          if (e.errorMessages && e.errorMessages.length > 0) {
+            errMsg = e.errorMessages.join('; ');
+          } else if (e.errors && typeof e.errors === 'object') {
+            errMsg = Object.values(e.errors).filter(Boolean).join('; ');
+          } else if (e.errors) {
+            errMsg = String(e.errors);
+          }
+          return Promise.reject(errMsg || `HTTP ${r.status}`);
+        });
       })
       .then(data => sendResponse(data))
       .catch(err => sendResponse({ ok: false, error: String(err) }));

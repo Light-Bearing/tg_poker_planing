@@ -134,9 +134,14 @@
                     <div class="card task-card">
                         <h2 class="task-header">
                             <span class="task-header-left">
-                                <span class="diamond"></span> ЗАДАЧА
+                                <span class="diamond"></span> ЗАДАЧА<span id="jiraTaskLink" class="jira-task-link" style="display:none;">: <a href="#" target="_blank" id="jiraTaskLinkUrl" class="session-id-copy"></a></span>
                             </span>
                             <span class="task-header-right">
+                                <span class="meta-room" id="epicMeta" style="display:none;">
+                                    <span class="meta-label">EPIC:</span>
+                                    <a href="#" target="_blank" id="epicLinkUrl" class="session-id-copy"></a>
+                                </span>
+                                <span class="meta-divider">|</span>
                                 <span class="meta-operator">
                                     <span class="meta-label">OP:</span>
                                     <strong id="initiatorDisplay"></strong>
@@ -169,7 +174,7 @@
                     </div>
                 </div>
                 
-                <!-- ПРАВАЯ ПАНЕЛЬ: УПРАВЛЕНИЕ + АНАЛИЗ + РЕЗУЛЬТАТ -->
+                <!-- ПРАВАЯ ПАНЕЛЬ: РЕЗУЛЬТАТ + АНАЛИЗ -->
                 <div class="right-panel">
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
@@ -180,7 +185,15 @@
                         </div>
                     </div>
                     
-                    <div class="card">
+                    <div class="card" id="resultCard" style="display:none;">
+                        <h2><span class="diamond"></span> РЕЗУЛЬТАТ <button class="jira-send-btn" id="jiraSendBtn" style="display:none;" onclick="jiraSendEstimate()">⚡ В JIRA</button></h2>
+                        <div style="text-align: center; padding: 10px;">
+                            <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue" contenteditable="true" title="Кликните чтобы изменить значение">-</div>
+                            <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">ИТОГ</div>
+                        </div>
+                    </div>
+                    
+                    <div class="card" id="statsCard">
                         <h2><span class="diamond"></span> АНАЛИЗ</h2>
                         <div class="stats">
                             <div class="stat-card">
@@ -198,20 +211,6 @@
                             </div>
                             <div class="progress-label" id="progressLabel">0 / 0</div>
                         </div>
-                    </div>
-                    
-                    <div class="card" id="resultCard" style="display:none;">
-                        <h2><span class="diamond"></span> РЕЗУЛЬТАТ</h2>
-                        <div style="text-align: center; padding: 10px; cursor: pointer;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
-                            <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue">-</div>
-                            <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">Итоговая оценка</div>
-                        </div>
-                        <button class="btn btn-outline jira-send-btn" id="jiraSendBtn" style="display:none; width:100%; margin-top:8px;" onclick="jiraSendEstimate()">
-                            ⚡ ОТПРАВИТЬ В JIRA
-                        </button>
-                    </div>
-                    <div class="card" id="histogramCard" style="display:none;">
-                        <h2><span class="diamond"></span> РАСПРЕДЕЛЕНИЕ</h2>
                         <div class="histogram" id="histogramContainer"></div>
                     </div>
                 </div>
