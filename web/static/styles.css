@@ -1345,7 +1345,8 @@ body::before {
     font-size: 0.85em;
     cursor: pointer;
     transition: all 0.2s;
-    display: none;
+    display: inline-flex;
+    visibility: hidden;
     align-items: center;
     justify-content: center;
     padding: 0;
@@ -1354,7 +1355,7 @@ body::before {
 }
 
 .scale-edit-btn.visible {
-    display: inline-flex;
+    visibility: visible;
 }
 
 .scale-edit-btn:hover {
