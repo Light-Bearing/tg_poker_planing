@@ -834,12 +834,11 @@ function updateSessionDisplay(session) {
     const resultCard = document.getElementById('resultCard');
     
     if (session.revealed && session.average > 0) {
-        const ceilAverage = Math.ceil(session.average);
         averageCard.style.display = 'block';
-        document.getElementById('averageValue').textContent = ceilAverage;
+        document.getElementById('averageValue').textContent = session.average.toFixed(1);
         resultCard.style.display = 'block';
         resultCard.style.cursor = 'pointer';
-        document.getElementById('resultValue').textContent = ceilAverage;
+        document.getElementById('resultValue').textContent = Math.ceil(session.average);
         document.getElementById('resultLabel').textContent = 'НАЖМИТЕ, ЧТОБЫ СКОПИРОВАТЬ';
         renderHistogram(session);
     } else {
