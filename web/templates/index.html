@@ -24,6 +24,7 @@
                 <button class="header-btn" onclick="toggleTheme()" aria-label="Переключить тему">
                     <span id="themeIcon">☀</span> <span id="themeText">СВЕТЛАЯ</span>
                 </button>
+                <button class="header-btn jira-btn" id="jiraBtn" onclick="toggleJiraPanel()" title="Jira интеграция">⚡ JIRA</button>
                 <button class="header-btn leave-btn hidden" id="leaveBtn" onclick="leaveSession()">✕ ВЫХОД</button>
             </div>
         </div>
@@ -49,6 +50,16 @@
                     <div class="form-group" id="taskGroup">
                         <label for="taskText">Описание задачи:</label>
                         <textarea id="taskText" placeholder="Опишите задачу для оценки..."></textarea>
+                    </div>
+                    <!-- Дерево задач Jira на экране подключения -->
+                    <div id="jiraJoinTreeContainer" class="jira-join-tree" style="display:none;">
+                        <div class="jira-join-tree-header">
+                            <span>📋 ЗАДАЧА ИЗ JIRA</span>
+                            <button class="btn btn-outline" onclick="jiraRefreshJoinTree()" style="font-size:0.7em;padding:2px 8px;">🔄</button>
+                        </div>
+                        <div class="jira-join-tree-wrapper" id="jiraJoinTreeWrapper">
+                            <div id="jiraJoinTree" class="jira-tree"></div>
+                        </div>
                     </div>
                     <button class="btn btn-primary join-btn" onclick="joinOrCreateSession()">▸ СОЗДАТЬ КОМНАТУ</button>
                 </div>
@@ -189,12 +200,15 @@
                         </div>
                     </div>
                     
-                    <div class="card" id="resultCard" style="display:none;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
+                    <div class="card" id="resultCard" style="display:none;">
                         <h2><span class="diamond"></span> РЕЗУЛЬТАТ</h2>
-                        <div style="text-align: center; padding: 10px;">
+                        <div style="text-align: center; padding: 10px; cursor: pointer;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
                             <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue">-</div>
                             <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">Итоговая оценка</div>
                         </div>
+                        <button class="btn btn-outline jira-send-btn" id="jiraSendBtn" style="display:none; width:100%; margin-top:8px;" onclick="jiraSendEstimate()">
+                            ⚡ ОТПРАВИТЬ В JIRA
+                        </button>
                     </div>
                     <div class="card" id="histogramCard" style="display:none;">
                         <h2><span class="diamond"></span> РАСПРЕДЕЛЕНИЕ</h2>
@@ -216,6 +230,73 @@
     <!-- TOAST КОНТЕЙНЕР -->
     <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
     
+    <!-- JIRA ПАНЕЛЬ -->
+    <div id="jiraPanel" class="jira-panel hidden">
+        <div class="jira-panel-header">
+            <span class="jira-panel-title">⚡ JIRA</span>
+            <button class="jira-panel-close" onclick="toggleJiraPanel()">✕</button>
+        </div>
+        <div class="jira-panel-body">
+            <!-- Нет расширения -->
+            <div id="jiraNoExt" class="jira-no-ext">
+                <div class="jira-no-ext-icon">🧩</div>
+                <p>Для интеграции с Jira нужно расширение браузера.</p>
+                <a class="btn btn-primary" href="/extension/download" download style="width:100%;justify-content:center;">
+                    📦 СКАЧАТЬ РАСШИРЕНИЕ
+                </a>
+                <details class="jira-install-help">
+                    <summary>❓ КАК УСТАНОВИТЬ</summary>
+                    <ol>
+                        <li>Распакуйте ZIP в отдельную папку</li>
+                        <li>Откройте <code>chrome://extensions</code></li>
+                        <li>Включите <strong>Режим разработчика</strong></li>
+                        <li>Нажмите <strong>Загрузить распакованное</strong></li>
+                        <li>Укажите папку с расширением</li>
+                        <li>Обновите страницу</li>
+                    </ol>
+                </details>
+            </div>
+
+            <!-- Настройки -->
+            <div id="jiraSettings" style="display:none;">
+                <div class="form-group">
+                    <label>URL Jira</label>
+                    <input type="text" id="jiraUrl" placeholder="https://jira.company.ru" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Token (API / Personal Access)</label>
+                    <input type="password" id="jiraToken" placeholder="ваш токен" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>JQL-фильтр задач</label>
+                    <input type="text" id="jiraFilter" value="assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC, updated DESC" autocomplete="off">
+                </div>
+                <div class="form-group" id="jiraFieldGroup" style="display:none;">
+                    <label>Поле Story Points</label>
+                    <select id="jiraFieldSelect"></select>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-outline" onclick="jiraTestConnection()" id="jiraTestBtn" style="flex:1;">ПРОВЕРИТЬ</button>
+                    <button class="btn btn-primary" onclick="jiraSaveSettings()" id="jiraSaveBtn" style="flex:1;">СОХРАНИТЬ</button>
+                </div>
+                <div id="jiraStatus" class="jira-status"></div>
+            </div>
+
+            <!-- Выбор задачи (внутри сессии) -->
+            <div id="jiraSessionSection" style="display:none;">
+                <button class="btn btn-outline" onclick="jiraLoadIssues()" id="jiraLoadBtn" style="width:100%;">🔄 ЗАГРУЗИТЬ ЗАДАЧИ</button>
+                <div class="jira-tree-wrapper" style="margin-top:8px;">
+                    <div id="jiraIssueTree" class="jira-tree"></div>
+                </div>
+                <div id="jiraIssuePreview" class="jira-preview" style="display:none;"></div>
+                <div class="jira-session-actions" id="jiraSessionActions" style="display:none;">
+                    <button class="btn btn-primary" onclick="jiraApplyTask()">▸ ПРИМЕНИТЬ К ЗАДАЧЕ</button>
+                </div>
+                <div id="jiraSessionStatus" class="jira-status"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- МОДАЛКА РЕДАКТОРА ШКАЛЫ -->
     <div id="scaleEditorModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="scaleEditorTitle" tabindex="-1">
         <div class="confirm-backdrop" onclick="closeCustomScaleEditor()"></div>
@@ -251,6 +332,30 @@
             <div class="confirm-actions">
                 <button class="btn btn-outline" onclick="closeConfirmModal(false)">ОТМЕНА</button>
                 <button class="btn btn-primary" id="confirmOkBtn" onclick="closeConfirmModal(true)">ПОДТВЕРДИТЬ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА ВЫБОРА ЗАДАЧИ ИЗ JIRA (НОВАЯ ЗАДАЧА) -->
+    <div id="newTaskModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="newTaskModalTitle" tabindex="-1">
+        <div class="confirm-backdrop" onclick="closeNewTaskModal()"></div>
+        <div class="confirm-dialog new-task-dialog">
+            <div class="confirm-header">
+                <span class="confirm-icon">📋</span>
+                <span class="confirm-title" id="newTaskModalTitle">ВЫБОР ЗАДАЧИ ИЗ JIRA</span>
+            </div>
+            <div class="new-task-modal-body">
+                <div style="display:flex;gap:8px;margin-bottom:8px;">
+                    <button class="btn btn-outline" onclick="jiraRefreshIssuesForModal()" id="newTaskRefreshBtn" style="flex:1;">🔄 ОБНОВИТЬ</button>
+                </div>
+                <div class="jira-tree-wrapper">
+                    <div id="newTaskTree" class="jira-tree"></div>
+                </div>
+                <div id="newTaskPreview" class="jira-preview" style="display:none;"></div>
+            </div>
+            <div class="confirm-actions">
+                <button class="btn btn-outline" onclick="closeNewTaskModal()">ОТМЕНА</button>
+                <button class="btn btn-primary" onclick="applyNewTaskFromModal()" id="newTaskApplyBtn">ВЫБРАТЬ ЗАДАЧУ</button>
             </div>
         </div>
     </div>

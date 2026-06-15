@@ -261,3 +261,10 @@ async def info(_):
     return JSONResponse(
         {"status": "running", "service": "planning-poker-bot", "features": ["telegram", "web", "websocket"]}
     )
+
+
+async def download_extension(_):
+    from starlette.responses import FileResponse
+
+    zip_path = "browser-extension/pp-jira-bridge.zip"
+    return FileResponse(zip_path, media_type="application/zip", filename="pp-jira-bridge.zip")
