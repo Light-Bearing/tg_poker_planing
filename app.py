@@ -24,6 +24,7 @@ from web_api import (
     api_save_custom_scale,
     api_set_scale,
     api_vote,
+    download_extension,
     health,
     info,
     web_index,
@@ -66,6 +67,7 @@ async def build_app():
         Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
         Route("/info", info, methods=["GET"]),
+        Route("/extension/download", download_extension, methods=["GET"]),
         Route("/telegram", telegram_webhook, methods=["POST"]),
         WebSocketRoute("/ws/{session_id}", websocket_endpoint),
     ]

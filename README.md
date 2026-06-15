@@ -1,35 +1,56 @@
-# Planning Poker Telegram Bot
+# Planning Poker — Telegram Bot + Web Interface
 
-🤖 Telegram бот для проведения Planning Poker сессий в чатах
+🤖 **Planning Poker** — это инструмент для командной оценки задач по методике Planning Poker. Поддерживает Telegram бота и веб-интерфейс с реаль-time синхронизацией через WebSocket.
 
 ## 🎯 Возможности
 
-- Создание сессий планирования покера прямо в Telegram
-- Голосование с использованием стандартной шкалы Story Points (1, 2, 3, 5, 8, 13, 20, 40, ❔, ☕)
-- Анонимное голосование до открытия карт
-- Возможность перезапуска голосования
-- Открытие карт с подсчетом результатов
-- Поддержка многострочных описаний задач
-- Сохранение состояния в базу данных
+### Общие
+- ✅ Создание сессий планирования покера
+- ✅ Анонимное голосование до открытия карт
+- ✅ Перезапуск голосования и открытие результатов
+- ✅ Поддержка многострочных описаний задач
+- ✅ Сохранение состояния в SQLite базу данных
+- ✅ Кастомные шкалы оценок
+
+### Telegram
+- 📱 Создание сессий через команды `/poker` или `/покер`
+- 🔔 Push-уведомления через Telegram Long Polling / Webhook
+- 🌐 Поддержка прокси (HTTP/SOCKS5) для обхода ограничений
+
+### Web Interface
+- 💻 Современный UI с темной/светлой темой
+- 🔄 Real-time синхронизация через WebSocket
+- 👥 Индикация онлайн-участников
+- 📊 Визуализация распределения голосов (гистограмма)
+- 🎵 Звуковые уведомления
+- 📋 История последних сессий (localStorage)
+
+### Jira Integration (Browser Extension)
+- 🔗 Интеграция с Jira через браузерное расширение
+- 📋 Загрузка задач из Jira по JQL-фильтру
+- 🎯 Автоматическое заполнение описания задачи
+- 💾 Сохранение Story Points обратно в Jira
+
+---
 
 ## 🚀 Быстрый старт
 
-### 1. Создание бота
+### 1. Создание Telegram бота
 
 1. Найдите в Telegram [@BotFather](https://t.me/BotFather)
 2. Создайте нового бота командой `/newbot`
 3. Сохраните полученный токен
 
-### 2. Настройка окружения
+### 2. Установка
 
 ```bash
 # Клонируйте репозиторий
 git clone <repository-url>
-cd tg-planning-poker
+cd tg_poker_planing
 
 # Создайте виртуальное окружение
-python -m venv venv
-source venv/bin/activate  # для Windows: venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Установите зависимости
 pip install -r requirements.txt
@@ -37,24 +58,46 @@ pip install -r requirements.txt
 
 ### 3. Настройка переменных окружения
 
+Создайте файл `.env` в корне проекта:
+
 ```bash
-export PP_BOT_TOKEN="ваш_токен_бота"
-export PP_BOT_DB_PATH="/путь/к/базе/данных/tg_pp_bot.db"
+# Обязательные переменные
+TELEGRAM_BOT_TOKEN=ваш_токен_бота_от_BotFather
+
+# Опциональные переменные
+PP_BOT_DB_PATH=/tmp/tg_pp_bot.db  # Путь к базе данных
+PROXY_URL=http://proxy:port        # Прокси для Telegram (опционально)
+RENDER_EXTERNAL_URL=ваш_домен      # Для webhook режима (опционально)
+PORT=8000                          # Port для веб-сервера (default: 8000)
+```
+
+**Примеры прокси:**
+```bash
+# HTTP прокси
+PROXY_URL=http://127.0.0.1:8080
+
+# SOCKS5 прокси
+PROXY_URL=socks5://username:password@proxy.example.com:1080
 ```
 
 ### 4. Запуск
 
 ```bash
-python ppbot/bot.py
+# Основной запуск (веб-сервер + Telegram бот)
+python3 main.py
 ```
+
+Бот запустится в режиме **Polling** (локальная разработка). Веб-интерфейс будет доступен по адресу: **http://localhost:8000**
+
+---
 
 ## 🐳 Запуск через Docker
 
-### 1. Сборка и запуск
+### 1. Быстрый запуск
 
 ```bash
 # Установите переменную окружения
-export PP_BOT_TOKEN="ваш_токен_бота"
+export TELEGRAM_BOT_TOKEN="ваш_токен_бота"
 
 # Запустите скрипт
 chmod +x run.sh
@@ -64,158 +107,490 @@ chmod +x run.sh
 ### 2. Ручная сборка Docker
 
 ```bash
+# Сборка образа
 docker build -t planning_poker_bot .
+
+# Запуск контейнера
 docker run -d \
   --name planning_poker_bot \
   --restart=unless-stopped \
-  -e PP_BOT_TOKEN="ваш_токен_бота" \
+  -p 8000:8000 \
+  -e TELEGRAM_BOT_TOKEN="ваш_токен_бота" \
   -e PP_BOT_DB_PATH="/db/tg_pp_bot.db" \
   -v ~/.ppbot/:/db/ \
   planning_poker_bot
 ```
 
+### 3. Docker Compose (рекомендуется)
+
+Создайте `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  planning-poker:
+    build: .
+    container_name: planning_poker_bot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - PP_BOT_DB_PATH=/db/tg_pp_bot.db
+      - PROXY_URL=${PROXY_URL:-}
+    volumes:
+      - ./data:/db
+```
+
+Запуск:
+```bash
+# Создайте .env файл с переменными
+cp .env.example .env
+# Отредактируйте .env
+
+# Запуск
+docker-compose up -d
+```
+
+---
+
 ## 💻 Использование
 
-### Команды бота
+### Telegram Бот
 
-- `/start` или `/help` - показать справку
-- `/poker [описание задачи]` - начать новую сессию планирования покера
+#### Команды
 
-### Пример использования
+| Команда | Описание |
+|---------|----------|
+| `/start`, `/help` | Показать справку |
+| `/poker [описание]` | Начать новую сессию |
+| `/покер [описание]` | То же, что `/poker` (русский) |
+| `/p [описание]` | Короткая версия |
+| `/зщлук [описание]` | Русская версия (кириллица) |
 
-```
+#### Примеры
+
+```bash
+# Простая задача
 /poker Разработка системы аутентификации
-- JWT токены
-- OAuth2 интеграция
-- Двухфакторная аутентификация
+
+# Многострочное описание
+/poker Реализовать JWT аутентификацию
+- Создать endpoint для логина
+- Реализовать refresh токены
+- Добавить валидацию
+
+# С выбором шкалы
+/poker задача --scale fibonacci
+/poker задача --scale powers_of_2
+/poker задача --scale tshirt
 ```
 
-### Доступные оценки
+#### Доступные оценки
 
-```
-1, 2, 3, 5, 8, 13, 20, 40, ❔, ☕
-```
+**Стандартные шкалы:**
 
-❔ - Не уверен / Нужно обсудить  
-☕ - Нужен перерыв / Кофе-брейк
+| Шкала | Значения |
+|-------|----------|
+| Fibonacci | 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, ❔, ☕ |
+| Powers of 2 | 1, 2, 4, 8, 16, 32, 64, ❔, ☕ |
+| T-shirt | XS, S, M, L, XL, XXL, ❔, ☕ |
+| Custom | Настраиваемая пользователем |
 
-### Управление сессией
+**Специальные значения:**
+- `❔` — Не уверен / Нужно обсудить
+- `☕` — Нужен перерыв / Кофе-брейк
 
-- **Голосование**: нажмите на кнопку с числом для выбора оценки
-- **Restart** - перезапустить голосование (только для инициатора)
-- **Restart 🆕** - перезапустить с новым сообщением
-- **Open Cards** - открыть карты и показать результаты
-- **Open Cards 🆕** - открыть карты в новом сообщении
+### Web Interface
+
+1. Откройте **http://localhost:8000**
+2. Введите имя и нажмите **"СОЗДАТЬ КОМНАТУ"**
+3. Поделитесь ссылкой на комнату с командой
+4. Голосуйте и открывайте карты
+
+#### Возможности веб-интерфейса
+
+- **Темы**: Переключение между светлой и темной темой
+- **Звуки**: Включение/выключение звуковых уведомлений
+- **Копирование**: Клик по ID комнаты для копирования
+- **История**: Последние комнаты сохраняются в браузере
+- **Гистограмма**: Визуализация распределения голосов
+
+---
 
 ## 🏗️ Архитектура
 
 ### Структура проекта
 
 ```
-tg-planning-poker/
-├── Dockerfile
-├── requirements.txt
-├── run.sh
-└── ppbot/
-    ├── bot.py           # Основной файл бота
-    ├── game.py          # Логика игры и управления сессиями
-    └── utils.py         # Вспомогательные функции
+tg_poker_planing/
+├── main.py                 # Точка входа, запуск сервера и бота
+├── app.py                  # Создание Starlette приложения
+├── config.py               # Конфигурация и логгирование
+├── state.py               # Глобальное состояние (storage, templates)
+│
+├── telegram_bot.py         # Обработчики Telegram бота
+├── web_api.py             # REST API для веб-интерфейса
+├── websocket_handler.py   # WebSocket обработчики
+├── connection.py          # Управление WebSocket подключениями
+│
+├── ppbot/
+│   ├── __init__.py
+│   └── game.py            # Логика игры, Game, Vote, GameRegistry
+│
+├── web/
+│   ├── templates/
+│   │   └── index.html     # HTML шаблон
+│   └── static/
+│       ├── script.js      # Frontend логика
+│       └── styles.css     # Стили
+│
+├── browser-extension/     # Jira интеграция (Chrome Extension)
+├── tests/                 # Тесты
+│   ├── test_game.py
+│   ├── test_api.py
+│   ├── test_telegram_bot.py
+│   ├── test_websocket.py
+│   └── test_app.py
+│
+├── requirements.txt       # Python зависимости
+├── Dockerfile            # Docker образ
+├── run.sh               # Скрипт запуска
+└── .env.example         # Пример конфигурации
 ```
 
 ### Основные компоненты
 
-- **Bot** (`ppbot/bot.py`) - обработка Telegram сообщений и callback'ов
-- **Game** (`ppbot/game.py`) - управление сессиями голосования
-- **GameRegistry** (`ppbot/game.py`) - хранение и управление играми в БД
+| Компонент | Описание |
+|-----------|----------|
+| `main.py` | Запуск uvicorn сервера и Telegram бота в отдельном потоке |
+| `telegram_bot.py` | Обработчики команд и callback'ов Telegram бота |
+| `web_api.py` | REST API эндпоинты для веб-интерфейса |
+| `websocket_handler.py` | WebSocket подключение и real-time обновления |
+| `connection.py` | ConnectionManager для управления WebSocket сессиями |
+| `ppbot/game.py` | Ядро: Game, Vote, GameRegistry (БД) |
 
-### Технологии
+### Технологический стек
 
-- **Python 3.10+** с asyncio
-- **aiotg** - фреймворк для Telegram Bot API
-- **aiosqlite** - асинхронная работа с SQLite
-- **Docker** - контейнеризация
+| Категория | Технологии |
+|-----------|------------|
+| Backend | Python 3.10+, asyncio |
+| Web Framework | Starlette, Uvicorn |
+| Telegram Bot | python-telegram-bot 20.7 |
+| Database | SQLite (aiosqlite) |
+| Frontend | Vanilla JS, WebSocket |
+| Templating | Jinja2 |
+| Testing | pytest, pytest-asyncio |
+| Code Style | Ruff |
+| Containerization | Docker |
+
+---
 
 ## ⚙️ Конфигурация
 
 ### Переменные окружения
 
 | Переменная | Обязательная | По умолчанию | Описание |
-|------------|--------------|--------------|-----------|
-| `PP_BOT_TOKEN` | ✅ | - | Токен бота от BotFather |
-| `PP_BOT_DB_PATH` | ❌ | `~/.tg_pp_bot.db` | Путь к файлу базы данных |
+|------------|--------------|--------------|----------|
+| `TELEGRAM_BOT_TOKEN` | ✅ | - | Токен бота от BotFather |
+| `PP_BOT_DB_PATH` | ❌ | `/tmp/tg_pp_bot.db` | Путь к файлу базы данных |
+| `PROXY_URL` | ❌ | - | Прокси для Telegram (HTTP/SOCKS5) |
+| `RENDER_EXTERNAL_URL` | ❌ | - | URL для webhook режима |
+| `WEBHOOK_URL` | ❌ | - | Альтернативный URL для webhook |
+| `PORT` | ❌ | `8000` | Порт веб-сервера |
 
-### Шкала оценок
+### Шкалы оценок
 
-Шкала оценок настраивается в `ppbot/game.py` в переменной `AVAILABLE_POINTS`:
+Шкалы оценок определяются в `ppbot/game.py`:
 
 ```python
-AVAILABLE_POINTS = [
-    "1", "2", "3", "4", "5", "6", "8",
-    "10", "12", "14", "16", "18",
-    "20", "28", "40", "❔", "☕",
-]
+SCALES = {
+    "custom": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", 
+               "11", "12", "14", "16", "18", "20", "28", "40", "❔", "☕"],
+    "fibonacci": ["1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "❔", "☕"],
+    "powers_of_2": ["1", "2", "4", "8", "16", "32", "64", "❔", "☕"],
+    "tshirt": ["XS", "S", "M", "L", "XL", "XXL", "❔", "☕"],
+}
 ```
 
-## 🔧 Разработка
+### База данных
 
-### Установка для разработки
+Используется SQLite с асинхронным доступом через aiosqlite.
 
-```bash
-git clone <repository-url>
-cd tg-planning-poker
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+**Схема:**
+
+```sql
+-- Активные сессии
+CREATE TABLE IF NOT EXISTS games (
+    chat_id TEXT,
+    game_id TEXT,
+    json_data TEXT,
+    PRIMARY KEY (chat_id, game_id)
+);
+
+-- Пользовательские шкалы
+CREATE TABLE IF NOT EXISTS custom_scales (
+    initiator_key TEXT PRIMARY KEY,
+    points TEXT NOT NULL
+);
 ```
+
+---
+
+## 🧪 Разработка
 
 ### Запуск в режиме разработки
 
 ```bash
-python ppbot/bot.py
+# Установка зависимостей
+pip install -r requirements.txt
+
+# Запуск
+python3 main.py
 ```
 
-### Логи
+### Запуск тестов
 
-Логи выводятся в формате:
-```
-2024-01-15 12:00:00 – aiotg – INFO – Message processed
-```
+```bash
+# Все тесты
+python3 -m pytest -v
 
-## 📊 База данных
+# С покрытием
+python3 -m pytest --cov=ppbot --cov=web_api --cov=telegram_bot
 
-Бот использует SQLite для хранения активных сессий. Схема базы:
+# Конкретный файл
+python3 -m pytest tests/test_game.py -v
 
-```sql
-CREATE TABLE IF NOT EXISTS games (
-    chat_id, 
-    game_id, 
-    json_data,
-    PRIMARY KEY (chat_id, game_id)
-)
+# Конкретный тест
+python3 -m pytest tests/test_game.py::test_game_create -v
 ```
 
-## 🐛 Решение проблем
+### Pre-commit hooks
 
-### Ошибка SSL сертификатов
+```bash
+# Установка pre-commit
+pre-commit install
 
-Если возникают проблемы с SSL сертификатами, бот автоматически отключает проверку SSL в development режиме.
+# Запуск вручную
+pre-commit run --all-files
+```
+
+### Linting
+
+```bash
+# Проверка кода
+ruff check .
+
+# Автофикс
+ruff check --fix .
+```
+
+---
+
+## 🔌 Jira Integration
+
+### Установка расширения
+
+1. Скачайте расширение: [Скачать pp-jira-bridge.zip](http://localhost:8000/extension/download)
+2. Распакуйте ZIP в отдельную папку
+3. Откройте `chrome://extensions`
+4. Включите **"Режим разработчика"**
+5. Нажмите **"Загрузить распакованное расширение"**
+6. Выберите папку с расширением
+7. Обновите страницу Planning Poker
+
+### Настройка
+
+1. Откройте панель **⚡ JIRA** в правом верхнем углу
+2. Введите URL вашей Jira
+3. Введите API Token (Personal Access Token)
+4. Настройте JQL-фильтр для загрузки задач
+5. Нажмите **"СОХРАНИТЬ"**
+
+### Использование
+
+1. Создайте или откройте сессию
+2. Нажмите **"⚡ JIRA"**
+3. Нажмите **"🔄 ЗАГРУЗИТЬ ЗАДАЧИ"**
+4. Выберите задачу из дерева
+5. Нажмите **"▸ ПРИМЕНИТЬ К ЗАДАЧЕ"**
+
+---
+
+## 📡 API Documentation
+
+### REST API
+
+#### Создание сессии
+```http
+POST /api/sessions
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "text": "Описание задачи",
+  "scale_name": "fibonacci"
+}
+```
+
+#### Голосование
+```http
+POST /api/sessions/{session_id}/vote
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "point": "5"
+}
+```
+
+#### Открытие карт
+```http
+POST /api/sessions/{session_id}/reveal
+Content-Type: application/json
+
+{
+  "username": "alice"
+}
+```
+
+#### Перезапуск сессии
+```http
+POST /api/sessions/{session_id}/restart
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "new_text": "Новое описание"
+}
+```
+
+#### Установка шкалы
+```http
+POST /api/sessions/{session_id}/scale
+Content-Type: application/json
+
+{
+  "scale_name": "fibonacci"
+}
+```
+
+### WebSocket Protocol
+
+Подключение: `ws://localhost:8000/ws/{session_id}`
+
+**Сообщения:**
+
+```json
+// Join to session
+{
+  "type": "join",
+  "username": "alice"
+}
+
+// Set scale
+{
+  "type": "set_scale",
+  "scale_name": "fibonacci"
+}
+
+// Ping/Pong
+"ping"
+```
+
+**Ответы сервера:**
+
+```json
+// Initial data
+{
+  "type": "init",
+  "data": { /* session data */ }
+}
+
+// Update
+{
+  "type": "update",
+  "data": { /* updated session data */ }
+}
+
+// User events
+{
+  "type": "user_joined",
+  "username": "alice",
+  "data": { /* session data */ }
+}
+
+{
+  "type": "user_left",
+  "username": "alice",
+  "data": { /* session data */ }
+}
+```
+
+---
+
+## 🐛 Troubleshooting
 
 ### Бот не отвечает
 
-1. Проверьте токен бота в переменной `PP_BOT_TOKEN`
+1. Проверьте токен бота в переменной `TELEGRAM_BOT_TOKEN`
 2. Убедитесь, что бот добавлен в чат и имеет права на отправку сообщений
 3. Проверьте логи на наличие ошибок
+4. Для webhook режима проверьте доступность URL извне
+
+### Ошибка подключения к Telegram
+
+```bash
+# Проверьте прокси
+export PROXY_URL=http://proxy:port
+
+# Или используйте прямое соединение (если нет ограничений)
+unset PROXY_URL
+```
 
 ### Проблемы с базой данных
 
-Убедитесь, что путь к базе данных доступен для записи:
 ```bash
-mkdir -p ~/.ppbot
+# Убедитесь, что путь к базе данных доступен
+mkdir -p $(dirname $PP_BOT_DB_PATH)
+
+# Проверьте права доступа
+chmod 644 $PP_BOT_DB_PATH
 ```
+
+### WebSocket не подключается
+
+1. Проверьте, что сервер запущен на правильном порту
+2. Убедитесь, что нет проблем с CORS (для production)
+3. Проверьте браузерную консоль на наличие ошибок
+
+---
+
+## 📊 Тестирование
+
+### Покрытие кода
+
+```bash
+python3 -m pytest --cov=ppbot --cov=web_api --cov=telegram_bot --cov-report=html
+
+# Откройте coverage отчет
+open htmlcov/index.html
+```
+
+### Типы тестов
+
+- **Unit tests** — тестирование отдельных компонентов
+- **Integration tests** — тестирование API и базы данных
+- **Async tests** — тестирование асинхронного кода
+
+---
 
 ## 📝 Лицензия
 
 MIT License
+
+---
 
 ## 🤝 Вклад в проект
 
@@ -225,6 +600,24 @@ MIT License
 4. Запушьте в ветку (`git push origin feature/amazing-feature`)
 5. Создайте Pull Request
 
+---
+
 ## 📞 Поддержка
 
-При возникновении проблем создавайте issue в репозитории проекта.
+При возникновении проблем:
+1. Проверьте логи сервера
+2. Убедитесь, что используете последнюю версию
+3. Создайте issue в репозитории с описанием проблемы
+
+---
+
+## 🛠 Changelog
+
+### Версия 1.0.0 (текущая)
+
+- ✅ Web интерфейс с WebSocket
+- ✅ Jira интеграция через browser extension
+- ✅ Кастомные шкалы оценок
+- ✅ Темная/светлая тема
+- ✅ Звуковые уведомления
+- ✅ Гистограмма распределения голосов

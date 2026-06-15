@@ -98,6 +98,1032 @@ class ConfirmManager {
 const toast = new ToastManager();
 const confirmDialog = new ConfirmManager();
 
+// ==================== JIRA STATE ====================
+let jiraSettings = JSON.parse(localStorage.getItem('pp_jira_settings') || '{}');
+let jiraIssues = [];          // все задачи (включая эпики)
+let jiraEpics = [];           // только эпики
+let jiraSelectedIssue = null;
+let jiraEpicLinkField = '';   // customfield_ID для связи с эпиком
+let jiraConnected = false;     // флаг успешного подключения к Jira
+let jiraAutoConnecting = false;// идёт автоподключение
+
+let _jiraMsgId = 0;
+const _jiraPending = new Map();
+
+function hasJiraExt() {
+    return document.documentElement.dataset.ppJiraExt !== undefined;
+}
+
+// Расширение может сигналить о готовности (если DOMContentLoaded уже прошёл)
+document.addEventListener('pp-jira-ready', () => {
+    if (!document.documentElement.dataset.ppJiraExt) {
+        document.documentElement.dataset.ppJiraExt = '1.0';
+    }
+    // Даём service worker'у расширения время на инициализацию
+    setTimeout(() => {
+        if (typeof jiraAutoConnect === 'function' && !jiraConnected && !jiraAutoConnecting) {
+            console.log('Jira: starting auto-connect (delayed 2s after pp-jira-ready)');
+            jiraAutoConnect();
+        }
+    }, 2000);
+});
+
+// Слушаем ответы от расширения
+document.addEventListener('pp-jira-response', (event) => {
+    const { msgId, response } = event.detail;
+    const resolve = _jiraPending.get(msgId);
+    if (resolve) {
+        _jiraPending.delete(msgId);
+        resolve(response);
+    }
+});
+
+function jiraSendMessage(msg) {
+    return new Promise((resolve) => {
+        if (!hasJiraExt()) {
+            resolve({ ok: false, error: 'EXTENSION_NOT_FOUND' });
+            return;
+        }
+        const msgId = ++_jiraMsgId;
+        _jiraPending.set(msgId, resolve);
+        document.dispatchEvent(new CustomEvent('pp-jira-message', {
+            detail: { msg, msgId }
+        }));
+    });
+}
+
+function toggleJiraPanel() {
+    const panel = document.getElementById('jiraPanel');
+    const isOpen = !panel.classList.contains('hidden');
+    panel.classList.toggle('hidden');
+
+    if (!isOpen) {
+        renderJiraPanel();
+    } else {
+        document.getElementById('jiraSettings').style.display = 'none';
+        document.getElementById('jiraNoExt').style.display = 'block';
+        document.getElementById('jiraSessionSection').style.display = 'none';
+    }
+}
+
+function renderJiraPanel() {
+    const noExt = document.getElementById('jiraNoExt');
+    const settings = document.getElementById('jiraSettings');
+    const sessionSection = document.getElementById('jiraSessionSection');
+    const preview = document.getElementById('jiraIssuePreview');
+    if (preview) preview.style.display = 'none';
+
+    noExt.style.display = hasJiraExt() ? 'none' : 'block';
+    settings.style.display = hasJiraExt() ? 'block' : 'none';
+    sessionSection.style.display = 'none';
+
+    if (hasJiraExt()) {
+        document.getElementById('jiraUrl').value = jiraSettings.jiraUrl || '';
+        document.getElementById('jiraToken').value = jiraSettings.jiraToken || '';
+        document.getElementById('jiraFilter').value = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC, updated DESC';
+
+        // Показываем актуальный статус подключения
+        const statusEl = document.getElementById('jiraStatus');
+        if (jiraConnected) {
+            if (!statusEl.textContent.includes('Подключено')) {
+                statusEl.className = 'jira-status ok';
+                statusEl.textContent = '✅ Подключено';
+            }
+        } else if (jiraAutoConnecting) {
+            statusEl.className = 'jira-status';
+            statusEl.textContent = '⏳ Подключение...';
+        } else if (jiraSettings.jiraUrl && jiraSettings.jiraToken) {
+            statusEl.className = 'jira-status';
+            statusEl.textContent = '💡 Нажмите ПРОВЕРИТЬ';
+        } else {
+            statusEl.textContent = '';
+        }
+
+        if (jiraSettings.storyPointsField) {
+            showJiraFieldSelect();
+            // Если селект пустой — пытаемся заполнить
+            const select = document.getElementById('jiraFieldSelect');
+            if (select && select.options.length === 0 && jiraSettings.storyPointsField) {
+                select.innerHTML = `<option value="${jiraSettings.storyPointsField}">${jiraSettings.storyPointsField}</option>`;
+            }
+        }
+
+        if (jiraSettings.epicLinkField) {
+            jiraEpicLinkField = jiraSettings.epicLinkField;
+        }
+
+        if (state.sessionId) {
+            sessionSection.style.display = 'block';
+            // Если задачи уже загружены — рендерим дерево
+            if (jiraIssues.length > 0) {
+                renderJiraIssueTree();
+            }
+            // Показываем статус загрузки, если есть
+            const statusEl = document.getElementById('jiraSessionStatus');
+            if (jiraIssues.length > 0) {
+                statusEl.className = 'jira-status ok';
+                statusEl.textContent = `✅ ${jiraIssues.length} задач, ${jiraEpics.length} эпиков`;
+            } else if (jiraConnected) {
+                statusEl.textContent = '🔄 загрузка...';
+            }
+        }
+
+        updateJiraHeaderBtn();
+    }
+}
+
+async function jiraTestConnection() {
+    const url = document.getElementById('jiraUrl').value.trim();
+    const token = document.getElementById('jiraToken').value.trim();
+    const statusEl = document.getElementById('jiraStatus');
+
+    if (!url || !token) {
+        statusEl.className = 'jira-status err';
+        statusEl.textContent = 'Заполните URL и токен';
+        return;
+    }
+
+    const btn = document.getElementById('jiraTestBtn');
+    btn.disabled = true;
+    btn.textContent = '...';
+    statusEl.className = 'jira-status';
+
+    const resp = await jiraSendMessage({ type: 'testConnection', jiraUrl: url, jiraToken: token });
+    if (resp.ok) {
+        jiraConnected = true;
+        statusEl.className = 'jira-status ok';
+        statusEl.textContent = `✅ Подключено: ${resp.displayName}`;
+        const fieldsResp = await jiraSendMessage({ type: 'getFields', jiraUrl: url, jiraToken: token });
+        if (fieldsResp.ok) {
+            jiraPopulateFieldSelect(fieldsResp.fields);
+            const epicLinkField = fieldsResp.fields.find(f =>
+                f.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link'
+            );
+            jiraEpicLinkField = epicLinkField ? epicLinkField.id : '';
+            // Сохраняем найденные поля
+            jiraSettings.epicLinkField = jiraEpicLinkField;
+            const select = document.getElementById('jiraFieldSelect');
+            if (select && select.value) {
+                jiraSettings.storyPointsField = select.value;
+            }
+            localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+            jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
+        }
+        // Показываем дерево задач на экране входа
+        showJiraJoinTree();
+        await jiraLoadIssues();
+    } else {
+        statusEl.className = 'jira-status err';
+        statusEl.textContent = `❌ ${resp.error}`;
+        jiraConnected = false;
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'ПРОВЕРИТЬ';
+}
+
+function jiraPopulateFieldSelect(fields) {
+    const storyFields = fields.filter(f =>
+        f.name.toLowerCase().includes('story point') ||
+        f.name.toLowerCase().includes('story point estimate') ||
+        f.name.toLowerCase().includes('оценка')
+    );
+    const select = document.getElementById('jiraFieldSelect');
+    if (!select) return;
+    select.innerHTML = storyFields.map(f =>
+        `<option value="${f.id}">${f.name} (${f.id})</option>`
+    ).join('');
+    if (storyFields.length === 0) {
+        select.innerHTML = fields
+            .filter(f => f.custom && f.schema?.type === 'number')
+            .slice(0, 20)
+            .map(f => `<option value="${f.id}">${f.name} (${f.id})</option>`).join('');
+    }
+    document.getElementById('jiraFieldGroup').style.display = 'block';
+    if (jiraSettings.storyPointsField) {
+        select.value = jiraSettings.storyPointsField;
+    }
+}
+
+function showJiraFieldSelect() {
+    document.getElementById('jiraFieldGroup').style.display = 'block';
+}
+
+async function jiraSaveSettings() {
+    const url = document.getElementById('jiraUrl').value.trim();
+    const token = document.getElementById('jiraToken').value.trim();
+    const filter = document.getElementById('jiraFilter').value.trim();
+    const fieldSelect = document.getElementById('jiraFieldSelect');
+    const fieldId = fieldSelect.value || '';
+
+    if (!url || !token) {
+        toast.warning('Заполните URL и токен');
+        return;
+    }
+
+    jiraSettings = { jiraUrl: url, jiraToken: token, jiraFilter: filter, storyPointsField: fieldId, epicLinkField: jiraEpicLinkField };
+    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+
+    const resp = await jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
+    if (resp.ok) {
+        toast.success('Настройки Jira сохранены');
+    } else if (resp.error === 'EXTENSION_NOT_FOUND') {
+        toast.warning('Настройки сохранены локально. Установите расширение для работы с Jira.');
+    }
+
+    document.getElementById('jiraStatus').className = 'jira-status';
+    document.getElementById('jiraStatus').textContent = '';
+    updateJiraHeaderBtn();
+}
+
+function updateJiraHeaderBtn() {
+    const btn = document.getElementById('jiraBtn');
+    if (!btn) return;
+    if (jiraSettings.jiraUrl && jiraSettings.jiraToken) {
+        btn.classList.add('has-settings');
+    } else {
+        btn.classList.remove('has-settings');
+    }
+}
+
+// ==================== AUTO-CONNECT JIRA ====================
+async function jiraAutoConnect() {
+    if (jiraAutoConnecting || jiraConnected) return;
+    if (!hasJiraExt()) return;
+    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) return;
+
+    jiraAutoConnecting = true;
+    console.log('Jira: auto-connecting...');
+
+    // Таймаут на весь авто-коннект (30 секунд — Jira бывает медленной)
+    let timeoutId = setTimeout(() => {
+        console.warn('Jira: auto-connect timed out after 30s');
+        jiraAutoConnecting = false;
+        updateJiraHeaderBtn();
+        const panel = document.getElementById('jiraPanel');
+        if (panel && !panel.classList.contains('hidden')) renderJiraPanel();
+    }, 30000);
+
+    try {
+        // Восстанавливаем epicLinkField из сохранённых настроек
+        if (jiraSettings.epicLinkField) {
+            jiraEpicLinkField = jiraSettings.epicLinkField;
+        }
+
+        // Тихий тест подключения (без UI-фидбека)
+        const resp = await jiraSendMessage({
+            type: 'testConnection',
+            jiraUrl: jiraSettings.jiraUrl,
+            jiraToken: jiraSettings.jiraToken
+        });
+
+        if (resp.ok) {
+            jiraConnected = true;
+            console.log('Jira: connected as', resp.displayName);
+
+            // Показываем статус в панели (если она открыта)
+            const statusEl = document.getElementById('jiraStatus');
+            if (statusEl) {
+                statusEl.className = 'jira-status ok';
+                statusEl.textContent = `✅ Подключено: ${resp.displayName}`;
+            }
+
+            // Загружаем поля, если ещё не выбрано storyPointsField
+            if (!jiraSettings.storyPointsField || !jiraEpicLinkField) {
+                const fieldsResp = await jiraSendMessage({
+                    type: 'getFields',
+                    jiraUrl: jiraSettings.jiraUrl,
+                    jiraToken: jiraSettings.jiraToken
+                });
+                if (fieldsResp.ok) {
+                    // Заполняем селект полей (чтобы при открытии панели не был пустым)
+                    jiraPopulateFieldSelect(fieldsResp.fields);
+
+                    if (!jiraSettings.storyPointsField) {
+                        // jiraPopulateFieldSelect уже выбрал подходящее поле,
+                        // берём его из селекта
+                        const select = document.getElementById('jiraFieldSelect');
+                        if (select && select.value) {
+                            jiraSettings.storyPointsField = select.value;
+                        }
+                    }
+                    if (!jiraEpicLinkField) {
+                        const epicField = fieldsResp.fields.find(f =>
+                            f.schema?.custom === 'com.pyxis.greenhopper.jira:gh-epic-link'
+                        );
+                        jiraEpicLinkField = epicField ? epicField.id : '';
+                        jiraSettings.epicLinkField = jiraEpicLinkField;
+                    }
+                    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+                    // Синхронизируем поля с расширением, чтобы при след. загрузке не терялись
+                    jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
+                }
+            } else {
+                // Поле уже выбрано — показываем селект, если панель открыта
+                if (jiraSettings.storyPointsField) {
+                    showJiraFieldSelect();
+                    const select = document.getElementById('jiraFieldSelect');
+                    if (select && select.options.length === 0) {
+                        // Селект пуст — подгрузим поля из Jira
+                        const fieldsResp = await jiraSendMessage({
+                            type: 'getFields',
+                            jiraUrl: jiraSettings.jiraUrl,
+                            jiraToken: jiraSettings.jiraToken
+                        });
+                        if (fieldsResp.ok) {
+                            jiraPopulateFieldSelect(fieldsResp.fields);
+                        }
+                    } else if (select) {
+                        select.value = jiraSettings.storyPointsField;
+                    }
+                }
+            }
+
+            // Показываем дерево на экране входа
+            showJiraJoinTree();
+            // Загружаем задачи
+            await jiraLoadIssues();
+        } else {
+            console.log('Jira: auto-connect failed:', resp.error);
+            showJiraJoinTree(); // скрываем дерево, показываем текстовое поле
+        }
+    } catch (err) {
+        console.error('Jira: auto-connect error:', err);
+        showJiraJoinTree();
+    }
+
+    clearTimeout(timeoutId);
+    jiraAutoConnecting = false;
+    updateJiraHeaderBtn();
+    // Если панель открыта — обновляем UI
+    const panel = document.getElementById('jiraPanel');
+    if (panel && !panel.classList.contains('hidden')) {
+        renderJiraPanel();
+    }
+}
+
+function showJiraJoinTree() {
+    const container = document.getElementById('jiraJoinTreeContainer');
+    const taskGroup = document.getElementById('taskGroup');
+    if (!container || !taskGroup) return;
+
+    if (jiraConnected && !state.sessionId) {
+        container.style.display = 'block';
+        taskGroup.style.display = 'none';
+    } else {
+        container.style.display = 'none';
+        taskGroup.style.display = 'block';
+    }
+}
+
+async function jiraRefreshJoinTree() {
+    await jiraLoadIssues();
+    renderJiraJoinTree();
+}
+
+function renderJiraJoinTree() {
+    const container = document.getElementById('jiraJoinTree');
+    if (!container) return;
+
+    if (jiraIssues.length === 0) {
+        container.innerHTML = '<div class="jira-tree-empty">Нет задач. Настройте JQL-фильтр в ⚡ JIRA</div>';
+        return;
+    }
+
+    // Группируем по полю Epic Link (не требуем отдельного списка эпиков)
+    const groups = {};
+    for (const issue of jiraIssues) {
+        if (issue.fields?.issuetype?.name === 'Epic') continue;
+        let epicKey = null;
+        if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+            epicKey = issue.fields[jiraEpicLinkField];
+            if (typeof epicKey === 'object' && epicKey.key) epicKey = epicKey.key;
+            else if (typeof epicKey === 'string') epicKey = epicKey.trim();
+        }
+        if (!epicKey) epicKey = '__no_epic__';
+        if (!groups[epicKey]) groups[epicKey] = { children: [] };
+        groups[epicKey].children.push(issue);
+    }
+
+    const groupKeys = Object.keys(groups).sort((a, b) => {
+        if (a === '__no_epic__') return 1;
+        if (b === '__no_epic__') return -1;
+        return 0;
+    });
+
+    let html = '';
+    for (const groupKey of groupKeys) {
+        const group = groups[groupKey];
+        const isNoEpic = groupKey === '__no_epic__';
+        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${groupKey}: ${escapeHtml(group.epic?.fields?.summary || '')}`;
+        html += `<div class="jira-tree-group">`;
+        html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
+                    <span class="jira-tree-toggle">▶</span>
+                    <span class="jira-tree-epic-label">${groupLabel}</span>
+                    <span class="jira-tree-count">${group.children.length}</span>
+                 </div>`;
+        html += `<div class="jira-tree-children">`;
+        for (const issue of group.children) {
+            const key = issue.key || '';
+            const summary = issue.fields?.summary || '';
+            html += `<div class="jira-tree-item" data-key="${key}" onclick="selectJoinJiraIssue(this, '${key}')">
+                        <span class="jira-tree-item-key">${key}</span>
+                        <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
+                     </div>`;
+        }
+        html += `</div></div>`;
+    }
+    container.innerHTML = html;
+
+    // Раскрываем первую группу
+    const firstGroup = container.querySelector('.jira-tree-group');
+    if (firstGroup) {
+        firstGroup.querySelector('.jira-tree-children').classList.add('open');
+        firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+    }
+}
+
+function selectJoinJiraIssue(el, key) {
+    document.querySelectorAll('#jiraJoinTree .jira-tree-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+
+    const issue = jiraIssues.find(i => i.key === key);
+    if (!issue) return;
+
+    const summary = issue.fields?.summary || '';
+    const taskValue = `[${key}] ${summary}`;
+    document.getElementById('taskText').value = taskValue;
+
+    // Если username заполнен — показываем кнопку "СОЗДАТЬ КОМНАТУ"
+    const username = document.getElementById('username').value.trim() || state.username;
+    if (username) {
+        // Просто обновляем текст кнопки — пользователь сам нажмёт
+        toast.info(`Выбрана задача ${key}. Нажмите «▸ СОЗДАТЬ КОМНАТУ»`, 'JIRA');
+    }
+}
+
+// ==================== JIRA ISSUES (внутри сессии) ====================
+async function jiraLoadIssues() {
+    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) {
+        toast.warning('Сначала настройте Jira в ⚡ JIRA');
+        return;
+    }
+
+    const btn = document.getElementById('jiraLoadBtn');
+    const statusEl = document.getElementById('jiraSessionStatus');
+    btn.disabled = true;
+    btn.textContent = '⏳ ЗАГРУЗКА...';
+    statusEl.className = 'jira-status';
+    statusEl.textContent = '';
+
+    const jql = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC';
+    const { jiraUrl, jiraToken } = jiraSettings;
+
+    let additionalFields = 'summary,description,issuetype,priority,project,issuelinks';
+    if (jiraEpicLinkField) {
+        additionalFields += ',' + jiraEpicLinkField;
+    }
+
+    console.log('[Jira] JQL filter used:', jql);
+    console.log('[Jira] Additional fields:', additionalFields);
+
+    const resp = await jiraSendMessage({
+        type: 'searchIssues',
+        jiraUrl,
+        jiraToken,
+        jql,
+        maxResults: 50,
+        fields: additionalFields,
+    });
+
+    console.log('[Jira] searchIssues response:', resp.ok ? `OK (${(resp.issues || []).length} issues)` : `ERROR: ${resp.error}`);
+
+    let epicIssues = [];
+    if (jiraEpicLinkField) {
+        const epicResp = await jiraSendMessage({
+            type: 'searchIssues',
+            jiraUrl,
+            jiraToken,
+            jql: 'issuetype = Epic ORDER BY updated DESC',
+            maxResults: 50,
+            fields: 'summary,description,issuetype,priority,project',
+        });
+        if (epicResp.ok) {
+            epicIssues = epicResp.issues || [];
+        }
+        console.log('[Jira] epics response:', epicResp.ok ? `OK (${(epicResp.issues || []).length} epics)` : `ERROR: ${epicResp.error}`);
+    }
+
+    btn.disabled = false;
+    btn.textContent = '🔄 ЗАГРУЗИТЬ ЗАДАЧИ';
+
+    if (resp.ok) {
+        const allIssues = [...epicIssues, ...(resp.issues || [])];
+        const seen = new Set();
+        jiraIssues = [];
+        for (const issue of allIssues) {
+            if (!seen.has(issue.key)) {
+                seen.add(issue.key);
+                jiraIssues.push(issue);
+            }
+        }
+        jiraEpics = jiraIssues.filter(i => i.fields?.issuetype?.name === 'Epic');
+
+        renderJiraIssueTree();
+        if (jiraIssues.length === 0) {
+            statusEl.className = 'jira-status';
+            statusEl.textContent = 'Нет задач по вашему JQL-фильтру';
+        } else {
+            const name = jiraSettings.jiraUrl.replace(/https?:\/\//, '').split('.')[0];
+            statusEl.className = 'jira-status ok';
+            statusEl.textContent = `✅ ${jiraIssues.length} задач, ${jiraEpics.length} эпиков из ${name}`;
+        }
+        // Обновляем дерево на экране входа
+        renderJiraJoinTree();
+        showJiraJoinTree();
+    } else {
+        statusEl.className = 'jira-status err';
+        statusEl.textContent = `❌ ${resp.error}`;
+        jiraIssues = [];
+        jiraEpics = [];
+        renderJiraIssueTree();
+        renderJiraJoinTree();
+        // Всё равно показываем дерево (с сообщением об ошибке), если Jira подключена
+        showJiraJoinTree();
+    }
+}
+
+function renderJiraIssueTree() {
+    const container = document.getElementById('jiraIssueTree');
+    if (!container || jiraIssues.length === 0) {
+        if (container) {
+            container.innerHTML = '<div class="jira-tree-empty">— нет задач —</div>';
+        }
+        document.getElementById('jiraSessionActions').style.display = 'none';
+        return;
+    }
+
+    const groups = {};
+    // Не требуем отдельного списка эпиков — группируем по значению поля Epic Link
+    for (const issue of jiraIssues) {
+        if (issue.fields?.issuetype?.name === 'Epic') continue;
+        let epicKey = null;
+        if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+            epicKey = issue.fields[jiraEpicLinkField];
+            // Может быть объектом { key: "PROJ-123" } или строкой "Название эпика"
+            if (typeof epicKey === 'object' && epicKey.key) {
+                epicKey = epicKey.key;
+            } else if (typeof epicKey === 'string') {
+                epicKey = epicKey.trim();
+            }
+        }
+        if (!epicKey) {
+            epicKey = '__no_epic__';
+        }
+        if (!groups[epicKey]) {
+            groups[epicKey] = { children: [] };
+        }
+        groups[epicKey].children.push(issue);
+    }
+
+    const priorityMap = { 'Highest': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Lowest': 4 };
+    function priorityOrder(name) { return priorityMap[name] ?? 3; }
+
+    const groupKeys = Object.keys(groups).sort((a, b) => {
+        if (a === '__no_epic__') return 1;
+        if (b === '__no_epic__') return -1;
+        return 0;
+    });
+
+    let html = '';
+    for (const groupKey of groupKeys) {
+        const group = groups[groupKey];
+        const isNoEpic = groupKey === '__no_epic__';
+        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${escapeHtml(groupKey)}`;
+        html += `<div class="jira-tree-group">`;
+        html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
+                    <span class="jira-tree-toggle">▶</span>
+                    <span class="jira-tree-epic-label">${groupLabel}</span>
+                    <span class="jira-tree-count">${group.children.length}</span>
+                 </div>`;
+        html += `<div class="jira-tree-children">`;
+        for (const issue of group.children) {
+            const key = issue.key || '';
+            const summary = issue.fields?.summary || '';
+            const priorityIcon = issue.fields?.priority?.iconUrl
+                ? `<img src="${issue.fields.priority.iconUrl}" class="jira-tree-priority-icon" alt="${issue.fields.priority.name}" title="${issue.fields.priority.name}">`
+                : '';
+            const selected = key === jiraSelectedIssue ? ' selected' : '';
+            html += `<div class="jira-tree-item${selected}" data-key="${key}" onclick="selectJiraTreeIssue(this, '${key}')">
+                        ${priorityIcon}
+                        <span class="jira-tree-item-key">${key}</span>
+                        <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
+                     </div>`;
+        }
+
+        html += `</div></div>`;
+    }
+
+    container.innerHTML = html;
+
+    const firstSelected = container.querySelector('.jira-tree-item.selected');
+    if (firstSelected) {
+        const parentGroup = firstSelected.closest('.jira-tree-group');
+        if (parentGroup) {
+            parentGroup.querySelector('.jira-tree-children').classList.add('open');
+            parentGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+        }
+    } else {
+        const firstGroup = container.querySelector('.jira-tree-group');
+        if (firstGroup) {
+            firstGroup.querySelector('.jira-tree-children').classList.add('open');
+            firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+        }
+        const firstItem = container.querySelector('.jira-tree-item');
+        if (firstItem) {
+            selectJiraTreeIssue(firstItem, firstItem.dataset.key);
+        }
+    }
+}
+
+function toggleJiraTreeGroup(el) {
+    const children = el.parentElement.querySelector('.jira-tree-children');
+    const toggle = el.querySelector('.jira-tree-toggle');
+    const isOpen = children.classList.contains('open');
+    children.classList.toggle('open');
+    toggle.textContent = isOpen ? '▶' : '▼';
+}
+
+function selectJiraTreeIssue(el, key) {
+    document.querySelectorAll('.jira-tree-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    jiraSelectedIssue = key;
+    document.getElementById('jiraSessionActions').style.display = 'block';
+    const issue = jiraIssues.find(i => i.key === key);
+    if (issue) {
+        showJiraIssuePreview(issue);
+    }
+}
+
+function showJiraIssuePreview(issue) {
+    const preview = document.getElementById('jiraIssuePreview');
+    if (!preview) return;
+    const summary = issue.fields?.summary || '';
+    const description = issue.fields?.description || '';
+    const key = issue.key || '';
+    const url = `${jiraSettings.jiraUrl}/browse/${key}`;
+    const linked = parseJiraIssueLinks(issue);
+
+    let linkedHtml = '';
+    if (linked.length > 0) {
+        linkedHtml = '<div class="jira-preview-links"><div class="jira-preview-links-title">🔗 Связанные задачи:</div>' +
+            linked.map(l => {
+                const linkUrl = `${jiraSettings.jiraUrl}/browse/${l.key}`;
+                return `<div class="jira-preview-link-item">
+                    <span class="jira-preview-link-direction">${escapeHtml(l.direction)}</span>
+                    <a href="${linkUrl}" target="_blank" class="jira-preview-link-key">${escapeHtml(l.key)}</a>
+                    <span class="jira-preview-link-summary">${escapeHtml(l.summary)}</span>
+                </div>`;
+            }).join('') + '</div>';
+    }
+
+    preview.innerHTML = `
+        <div class="jira-preview-header">
+            <a href="${url}" target="_blank" class="jira-preview-link">${key}</a>
+            <span class="jira-preview-summary">${escapeHtml(summary)}</span>
+        </div>
+        ${description ? `<div class="jira-preview-desc">${formatJiraDescription(description)}</div>` : ''}
+        ${linkedHtml}
+    `;
+    preview.style.display = 'block';
+}
+
+function parseJiraIssueLinks(issue) {
+    const links = issue.fields?.issuelinks || [];
+    const result = [];
+    for (const link of links) {
+        const type = link.type || {};
+        if (link.inwardIssue && link.inwardIssue.key !== issue.key) {
+            result.push({
+                key: link.inwardIssue.key,
+                summary: link.inwardIssue.fields?.summary || '',
+                direction: type.inward || 'relates to',
+            });
+        }
+        if (link.outwardIssue && link.outwardIssue.key !== issue.key) {
+            result.push({
+                key: link.outwardIssue.key,
+                summary: link.outwardIssue.fields?.summary || '',
+                direction: type.outward || 'relates to',
+            });
+        }
+    }
+    return result;
+}
+
+function formatJiraDescription(text) {
+    if (!text) return '';
+    const escaped = escapeHtml(text).replace(/\n/g, '<br>');
+    return escaped.replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener" class="jira-link">$1</a>');
+}
+
+function jiraApplyTask() {
+    if (!jiraSelectedIssue) return;
+    const issue = jiraIssues.find(i => i.key === jiraSelectedIssue);
+    if (!issue) return;
+
+    const summary = issue.fields?.summary || '';
+    const description = issue.fields?.description || '';
+    const taskValue = `[${issue.key}] ${summary}`;
+    const issueUrl = `${jiraSettings.jiraUrl}/browse/${issue.key}`;
+    const taskHtml = `<a href="${issueUrl}" target="_blank" class="task-jira-link">${escapeHtml(issue.key)}</a> ${escapeHtml(summary)}`;
+
+    if (state.sessionId) {
+        jiraSelectedIssue = issue.key;
+        document.getElementById('taskDisplay').innerHTML = taskHtml;
+        document.getElementById('taskDisplay').dataset.jiraDesc = description;
+        updateTaskDescriptionWithJira(description, parseJiraIssueLinks(issue));
+        toggleJiraPanel();
+        jiraSendEstimate();
+        return;
+    }
+
+    document.getElementById('taskText').value = taskValue;
+    toggleJiraPanel();
+
+    const username = document.getElementById('username').value.trim() || state.username;
+    const sessionId = document.getElementById('sessionId').value.trim();
+
+    if (!username) {
+        toast.success(`Задача ${issue.key} подставлена в описание`, 'JIRA');
+        document.getElementById('username').focus();
+        return;
+    }
+
+    if (sessionId) {
+        toast.success(`Задача ${issue.key} подставлена. Нажмите «▸ ВОЙТИ В КОМНАТУ»`, 'JIRA');
+        return;
+    }
+
+    document.getElementById('username').value = username;
+    joinOrCreateSession();
+}
+
+function updateTaskDescriptionWithJira(description, linked = []) {
+    const taskDisplay = document.getElementById('taskDisplay');
+    let descEl = document.getElementById('taskJiraDesc');
+    if (!descEl) {
+        descEl = document.createElement('div');
+        descEl.id = 'taskJiraDesc';
+        descEl.className = 'task-jira-desc';
+        taskDisplay.parentElement.appendChild(descEl);
+    }
+
+    let html = '';
+    if (description) {
+        html += '<div class="task-jira-desc-text">' + formatJiraDescription(description) + '</div>';
+    }
+    if (linked.length > 0) {
+        html += '<div class="task-jira-links">' +
+            linked.map(l => {
+                const linkUrl = `${jiraSettings.jiraUrl}/browse/${l.key}`;
+                return `<div class="task-jira-link-item">
+                    <span class="task-jira-link-direction">${escapeHtml(l.direction)}</span>
+                    <a href="${linkUrl}" target="_blank" class="task-jira-link-key">${escapeHtml(l.key)}</a>
+                    <span class="task-jira-link-summary">${escapeHtml(l.summary)}</span>
+                </div>`;
+            }).join('') +
+        '</div>';
+    }
+    descEl.innerHTML = html;
+    descEl.style.display = html ? 'block' : 'none';
+}
+
+async function jiraSendEstimate() {
+    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken || !jiraSettings.storyPointsField) {
+        toast.warning('Сначала настройте Jira в ⚡ JIRA');
+        toggleJiraPanel();
+        return;
+    }
+
+    if (!jiraSelectedIssue) {
+        toggleJiraPanel();
+        if (jiraIssues.length === 0) {
+            await jiraLoadIssues();
+        }
+        return;
+    }
+
+    const value = Math.ceil(parseFloat(document.getElementById('resultValue').textContent));
+    if (!value || value <= 0) return;
+
+    const btn = document.getElementById('jiraSendBtn');
+    btn.classList.add('sending');
+    btn.textContent = '⏳ ОТПРАВКА...';
+
+    const resp = await jiraSendMessage({
+        type: 'setEstimate',
+        jiraUrl: jiraSettings.jiraUrl,
+        jiraToken: jiraSettings.jiraToken,
+        issueKey: jiraSelectedIssue,
+        fieldId: jiraSettings.storyPointsField,
+        value,
+    });
+
+    btn.classList.remove('sending');
+    btn.textContent = '⚡ ОТПРАВИТЬ В JIRA';
+
+    if (resp.ok) {
+        toast.success(`Оценка ${value} отправлена в ${jiraSelectedIssue}`, 'JIRA');
+        jiraSendMessage({
+            type: 'addComment',
+            jiraUrl: jiraSettings.jiraUrl,
+            jiraToken: jiraSettings.jiraToken,
+            issueKey: jiraSelectedIssue,
+            comment: `Planning Poker: оценка команды = ${value} (задача: ${document.getElementById('taskDisplay').textContent})`,
+        });
+        setTimeout(() => jiraLoadIssues(), 2000);
+    } else {
+        toast.error(resp.error || 'Ошибка отправки в Jira', 'JIRA');
+    }
+}
+
+// ==================== JIRA NEW TASK MODAL ====================
+let _newTaskModalSelected = null;
+
+function openNewTaskModal() {
+    const modal = document.getElementById('newTaskModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    _newTaskModalSelected = null;
+    document.getElementById('newTaskApplyBtn').disabled = true;
+
+    // Рендерим дерево
+    const treeContainer = document.getElementById('newTaskTree');
+    if (!treeContainer) return;
+
+    // Используем тот же рендерер, что и в панели, но с кастомным селектором
+    renderJiraTreeInContainer(treeContainer, (key) => {
+        _newTaskModalSelected = key;
+        document.getElementById('newTaskApplyBtn').disabled = false;
+        // Показываем превью
+        const issue = jiraIssues.find(i => i.key === key);
+        if (issue) {
+            const preview = document.getElementById('newTaskPreview');
+            const summary = issue.fields?.summary || '';
+            const description = issue.fields?.description || '';
+            const url = `${jiraSettings.jiraUrl}/browse/${key}`;
+            const linked = parseJiraIssueLinks(issue);
+
+            let linkedHtml = '';
+            if (linked.length > 0) {
+                linkedHtml = '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:4px;">' +
+                    linked.map(l => {
+                        const linkUrl = `${jiraSettings.jiraUrl}/browse/${l.key}`;
+                        return `<div style="display:flex;align-items:center;gap:4px;font-size:0.85em;padding:2px 0;">
+                            <span style="opacity:0.6;font-size:0.85em;">${escapeHtml(l.direction)}</span>
+                            <a href="${linkUrl}" target="_blank" style="color:var(--accent);font-weight:600;">${escapeHtml(l.key)}</a>
+                            <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(l.summary)}</span>
+                        </div>`;
+                    }).join('') + '</div>';
+            }
+
+            preview.innerHTML = `
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                    <a href="${url}" target="_blank" style="color:var(--accent);font-weight:700;font-size:1.1em;">${escapeHtml(key)}</a>
+                    <span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(summary)}</span>
+                </div>
+                ${description ? `<div style="color:var(--text-secondary);font-size:0.9em;line-height:1.5;max-height:80px;overflow-y:auto;">${formatJiraDescription(description)}</div>` : ''}
+                ${linkedHtml}
+            `;
+            preview.style.display = 'block';
+        }
+    });
+
+    setTimeout(() => {
+        const firstItem = treeContainer.querySelector('.jira-tree-item');
+        if (firstItem) firstItem.click();
+    }, 100);
+}
+
+function closeNewTaskModal() {
+    document.getElementById('newTaskModal').classList.add('hidden');
+    document.getElementById('newTaskPreview').style.display = 'none';
+    _newTaskModalSelected = null;
+}
+
+async function jiraRefreshIssuesForModal() {
+    const btn = document.getElementById('newTaskRefreshBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    await jiraLoadIssues();
+    btn.disabled = false;
+    btn.textContent = '🔄 ОБНОВИТЬ';
+    // Перерендериваем дерево
+    const treeContainer = document.getElementById('newTaskTree');
+    if (treeContainer && jiraIssues.length > 0) {
+        renderJiraTreeInContainer(treeContainer, (key) => {
+            _newTaskModalSelected = key;
+            document.getElementById('newTaskApplyBtn').disabled = false;
+        });
+    }
+}
+
+async function applyNewTaskFromModal() {
+    if (!_newTaskModalSelected) return;
+    const issue = jiraIssues.find(i => i.key === _newTaskModalSelected);
+    if (!issue) return;
+
+    const summary = issue.fields?.summary || '';
+    const newText = `[${_newTaskModalSelected}] ${summary}`;
+    closeNewTaskModal();
+
+    // Обновляем taskDisplay и сбрасываем голосование
+    await restartSession(newText);
+}
+
+function renderJiraTreeInContainer(container, onSelect) {
+    if (!container) return;
+    if (jiraIssues.length === 0) {
+        container.innerHTML = '<div class="jira-tree-empty">— нет задач —</div>';
+        return;
+    }
+
+    const groups = {};
+    for (const epic of jiraEpics) {
+        groups[epic.key] = { epic, children: [] };
+    }
+    for (const issue of jiraIssues) {
+        if (issue.fields?.issuetype?.name === 'Epic') continue;
+        let epicKey = null;
+        if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
+            epicKey = issue.fields[jiraEpicLinkField];
+            if (typeof epicKey === 'object' && epicKey.key) epicKey = epicKey.key;
+        }
+        if (!epicKey || !groups[epicKey]) epicKey = '__no_epic__';
+        if (!groups[epicKey]) groups[epicKey] = { epic: null, children: [] };
+        groups[epicKey].children.push(issue);
+    }
+
+    const groupKeys = Object.keys(groups).sort((a, b) => {
+        if (a === '__no_epic__') return 1;
+        if (b === '__no_epic__') return -1;
+        return 0;
+    });
+
+    let html = '';
+    for (const groupKey of groupKeys) {
+        const group = groups[groupKey];
+        const isNoEpic = groupKey === '__no_epic__';
+        const groupLabel = isNoEpic ? '📋 Без эпика' : `📌 ${groupKey}: ${escapeHtml(group.epic?.fields?.summary || '')}`;
+        html += `<div class="jira-tree-group">`;
+        html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
+                    <span class="jira-tree-toggle">▶</span>
+                    <span class="jira-tree-epic-label">${groupLabel}</span>
+                    <span class="jira-tree-count">${group.children.length}</span>
+                 </div>`;
+        html += `<div class="jira-tree-children">`;
+        for (const issue of group.children) {
+            const key = issue.key || '';
+            const summary = issue.fields?.summary || '';
+            const priorityIcon = issue.fields?.priority?.iconUrl
+                ? `<img src="${issue.fields.priority.iconUrl}" class="jira-tree-priority-icon" alt="${issue.fields.priority.name}" title="${issue.fields.priority.name}">`
+                : '';
+            html += `<div class="jira-tree-item" data-key="${key}" onclick="selectNewTaskTreeItem(this, '${key}')">
+                        ${priorityIcon}
+                        <span class="jira-tree-item-key">${key}</span>
+                        <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
+                     </div>`;
+        }
+        html += `</div></div>`;
+    }
+    container.innerHTML = html;
+
+    // Раскрываем первую группу
+    const firstGroup = container.querySelector('.jira-tree-group');
+    if (firstGroup) {
+        firstGroup.querySelector('.jira-tree-children').classList.add('open');
+        firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+    }
+
+    // При клике на элемент — вызываем onSelect
+    if (onSelect) {
+        container.querySelectorAll('.jira-tree-item').forEach(el => {
+            el.addEventListener('dblclick', () => {
+                const key = el.dataset.key;
+                if (key) applyNewTaskFromModal();
+            });
+        });
+    }
+}
+
+function selectNewTaskTreeItem(el, key) {
+    document.querySelectorAll('#newTaskTree .jira-tree-item').forEach(i => i.classList.remove('selected'));
+    el.classList.add('selected');
+    _newTaskModalSelected = key;
+    document.getElementById('newTaskApplyBtn').disabled = false;
+}
+
 // Глобальная функция для модалки (используется в onclick)
 function closeConfirmModal(result) {
     confirmDialog.close(result);
@@ -576,7 +1602,17 @@ function updateSoundButton() {
 function toggleTaskField() {
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskGroup = document.getElementById('taskGroup');
-    taskGroup.classList.toggle('collapsed', !!sessionId);
+    const jiraTree = document.getElementById('jiraJoinTreeContainer');
+    if (sessionId) {
+        taskGroup.classList.add('collapsed');
+        if (jiraTree) jiraTree.style.display = 'none';
+    } else {
+        taskGroup.classList.remove('collapsed');
+        // Если Jira подключена и нет sessionId — показываем дерево
+        if (jiraConnected && !state.sessionId) {
+            showJiraJoinTree();
+        }
+    }
     updateJoinButtonText();
 }
 
@@ -618,6 +1654,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { once: true });
     }
     soundManager.setEnabled(state.soundEnabled);
+
+    // Проверяем расширение Jira
+    if (!hasJiraExt()) {
+        console.log('PP Jira Bridge extension not detected');
+        showJiraJoinTree();
+    } else {
+        console.log('PP Jira Bridge extension detected');
+        jiraSendMessage({ type: 'getSettings' }).then((extSettings) => {
+            if (extSettings && extSettings.jiraUrl) {
+                // Мержим: расширение -> приоритет для URL/token/filter,
+                // localStorage -> приоритет для полей (storyPointsField, epicLinkField),
+                // т.к. автообнаружение могло их сохранить локално, но не в расширение
+                const localSettings = { ...jiraSettings };
+                jiraSettings = {
+                    ...extSettings,
+                    // Сохраняем поля, если они есть в локалке, но отсутствуют в расширении
+                    storyPointsField: extSettings.storyPointsField || localSettings.storyPointsField || '',
+                    epicLinkField: extSettings.epicLinkField || localSettings.epicLinkField || '',
+                };
+                localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+                if (jiraSettings.epicLinkField) {
+                    jiraEpicLinkField = jiraSettings.epicLinkField;
+                }
+                updateJiraHeaderBtn();
+                // Автоподключение с задержкой (даём service worker'у инициализироваться)
+                setTimeout(() => {
+                    if (!jiraConnected && !jiraAutoConnecting) {
+                        console.log('Jira: starting auto-connect (delayed 2s after DOMContentLoaded)');
+                        jiraAutoConnect();
+                    }
+                }, 2000);
+            } else {
+                showJiraJoinTree();
+            }
+        });
+    }
     
     document.getElementById('username').value = state.username;
     
@@ -816,9 +1888,37 @@ function updateSessionDisplay(session) {
         state.wasRevealed = false;
     }
 
-    document.getElementById('taskDisplay').innerHTML = formatTaskText(session.text);
+    // Если задача начинается с [TASK-123] — рендерим как ссылку на Jira
+    const taskText = session.text || '';
+    const jiraMatch = taskText.match(/^\[([A-Z]+-\d+)\]\s*(.*)/);
+    if (jiraMatch && jiraSettings.jiraUrl) {
+        const key = jiraMatch[1];
+        const summary = jiraMatch[2];
+        const issueUrl = `${jiraSettings.jiraUrl}/browse/${key}`;
+        document.getElementById('taskDisplay').innerHTML = `
+            <a href="${issueUrl}" target="_blank" class="task-jira-link">${escapeHtml(key)}</a>
+            ${escapeHtml(summary)}
+        `;
+        const cachedIssue = jiraIssues.find(i => i.key === key);
+        if (cachedIssue?.fields?.description) {
+            updateTaskDescriptionWithJira(cachedIssue.fields.description, parseJiraIssueLinks(cachedIssue));
+        } else if (cachedIssue) {
+            const linked = parseJiraIssueLinks(cachedIssue);
+            if (linked.length > 0) {
+                updateTaskDescriptionWithJira('', linked);
+            }
+        }
+    } else {
+        document.getElementById('taskDisplay').innerHTML = formatTaskText(taskText);
+        const descEl = document.getElementById('taskJiraDesc');
+        if (descEl) descEl.style.display = 'none';
+    }
     document.getElementById('initiatorDisplay').textContent = session.initiator_name;
     document.getElementById('sessionIdDisplay').textContent = state.sessionId;
+
+    // Показываем кнопку Jira в хедере
+    document.getElementById('jiraBtn').classList.remove('hidden');
+    updateJiraHeaderBtn();
     
     const grid = document.getElementById('pointsGrid');
     grid.innerHTML = '';
@@ -848,6 +1948,13 @@ function updateSessionDisplay(session) {
         resultCard.style.cursor = 'pointer';
         document.getElementById('resultValue').textContent = Math.ceil(session.average);
         document.getElementById('resultLabel').textContent = 'НАЖМИТЕ, ЧТОБЫ СКОПИРОВАТЬ';
+        // Кнопка Jira — только если есть расширение
+        const jiraSendBtn = document.getElementById('jiraSendBtn');
+        if (hasJiraExt() && jiraSettings.jiraUrl && jiraSettings.jiraToken) {
+            jiraSendBtn.style.display = 'block';
+        } else {
+            jiraSendBtn.style.display = 'none';
+        }
         renderHistogram(session);
     } else {
         averageCard.style.display = 'none';
@@ -1040,6 +2147,13 @@ async function castVote(point) {
 }
 
 function toggleNewTaskInput() {
+    // Если Jira подключена — открываем модалку выбора задачи
+    if (jiraConnected && jiraIssues.length > 0) {
+        openNewTaskModal();
+        return;
+    }
+
+    // Иначе старый inline-режим
     const container = document.getElementById('newTaskInline');
     const input = document.getElementById('newTaskText');
     if (container.style.display === 'none' || !container.style.display) {
@@ -1060,6 +2174,9 @@ async function startNewTask() {
     const container = document.getElementById('newTaskInline');
     container.style.display = 'none';
     document.getElementById('newTaskText').value = '';
+    // Убираем jira-описание
+    const descEl = document.getElementById('taskJiraDesc');
+    if (descEl) descEl.style.display = 'none';
     await restartSession(newText);
 }
 
@@ -1151,6 +2268,10 @@ async function leaveSession() {
     document.getElementById('taskText').value = '';
     document.getElementById('taskGroup').style.display = 'block';
     
+    // Убираем jira-описание если было
+    const descEl = document.getElementById('taskJiraDesc');
+    if (descEl) descEl.style.display = 'none';
+    
     // ✅ НОВОЕ: Обновляем историю комнат при возвращении
     renderRecentRooms();
     
@@ -1159,6 +2280,12 @@ async function leaveSession() {
     // Прокручиваем joinScreen наверх, чтобы было видно заголовок
     document.getElementById('joinScreen').scrollTop = 0;
     document.getElementById('username').focus();
+
+    // Восстанавливаем дерево Jira на экране входа
+    if (jiraConnected && !state.sessionId) {
+        renderJiraJoinTree();
+        showJiraJoinTree();
+    }
 }
 
 function copySessionLink() {
