@@ -615,3 +615,32 @@ class TestAPIErrorHandling:
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
+
+    def test_api_set_scale_exception(self, tmp_path):
+        """Exception in api_set_scale returns 500."""
+        import asyncio
+
+        import state
+        from ppbot.game import GameRegistry
+
+        state.storage = GameRegistry()
+        asyncio.run(state.storage.init_db(str(tmp_path / "test_err7.db")))
+
+        from starlette.applications import Starlette
+        from starlette.middleware import Middleware
+        from starlette.middleware.cors import CORSMiddleware
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+
+        from web_api import api_set_scale
+
+        app = Starlette(
+            routes=[Route("/api/sessions/{session_id}/scale", api_set_scale, methods=["POST"])],
+            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        )
+        tc = TestClient(app)
+        with patch("web_api.state.storage.get_game", side_effect=Exception("db error")):
+            resp = tc.post("/api/sessions/test/scale", json={"scale_name": "fibonacci"})
+            assert resp.status_code == 500
+
+        asyncio.run(state.storage.close())

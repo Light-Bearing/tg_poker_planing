@@ -16,10 +16,13 @@ from ppbot.game import GameRegistry
 from telegram_bot import init_bot, telegram_webhook
 from web_api import (
     api_create_session,
+    api_get_custom_scale,
     api_get_session,
     api_list_sessions,
     api_restart,
     api_reveal,
+    api_save_custom_scale,
+    api_set_scale,
     api_vote,
     health,
     info,
@@ -58,6 +61,9 @@ async def build_app():
         Route("/api/sessions/{session_id}/vote", api_vote, methods=["POST"]),
         Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"]),
         Route("/api/sessions/{session_id}/reveal", api_reveal, methods=["POST"]),
+        Route("/api/sessions/{session_id}/scale", api_set_scale, methods=["POST"]),
+        Route("/api/custom-scale", api_get_custom_scale, methods=["GET"]),
+        Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
         Route("/info", info, methods=["GET"]),
         Route("/telegram", telegram_webhook, methods=["POST"]),

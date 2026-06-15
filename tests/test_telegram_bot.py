@@ -10,6 +10,7 @@ from telegram_bot import (
     callback_handler,
     create_telegram_app,
     handle_operation_click,
+    handle_scale_click,
     handle_vote_click,
     init_bot,
     poker_command,
@@ -429,3 +430,65 @@ class TestTelegramWebhook:
             resp = await telegram_webhook(request)
             assert resp.status_code == 200
             mock_app.process_update.assert_awaited_once()
+
+
+class TestParseScaleFromArgs:
+    def test_default_when_no_scale_arg(self):
+        from telegram_bot import _parse_scale_from_args
+
+        scale, rest = _parse_scale_from_args(["task", "description"])
+        assert scale == "custom"
+        assert rest == ["task", "description"]
+
+    def test_scale_with_equals(self):
+        from telegram_bot import _parse_scale_from_args
+
+        scale, rest = _parse_scale_from_args(["task", "--scale=fibonacci"])
+        assert scale == "fibonacci"
+        assert rest == ["task"]
+
+    def test_scale_with_separate_value(self):
+        from telegram_bot import _parse_scale_from_args
+
+        scale, rest = _parse_scale_from_args(["--scale", "tshirt", "task"])
+        assert scale == "tshirt"
+        assert rest == ["task"]
+
+    def test_invalid_scale_falls_back(self):
+        from telegram_bot import _parse_scale_from_args
+
+        scale, rest = _parse_scale_from_args(["--scale", "bogus"])
+        assert scale == "custom"
+
+
+class TestHandleScaleClick:
+    @pytest.mark.asyncio
+    async def test_cycles_to_next_scale(self):
+        """handle_scale_click advances to the next scale preset."""
+        game = state.storage.new_game(-100, "scale1", {"id": 1, "first_name": "A", "username": "a"}, "task")
+        await state.storage.save_game(game)
+
+        query = AsyncMock()
+        query.data = "scale-cycle-scale1"
+        query.message.chat_id = -100
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handle_scale_click(query, query.data, -100)
+        query.edit_message_text.assert_awaited_once()
+
+        # Scale should have changed from "custom" to "fibonacci" (first next entry)
+        updated = await state.storage.get_game(-100, "scale1")
+        assert updated.scale_name != "custom"
+
+    @pytest.mark.asyncio
+    async def test_game_not_found(self):
+        from telegram_bot import handle_scale_click
+
+        query = AsyncMock()
+        query.data = "scale-cycle-nonexistent"
+        query.message.chat_id = -100
+        query.answer = AsyncMock()
+
+        await handle_scale_click(query, query.data, -100)
+        query.answer.assert_awaited_with("Game not found", show_alert=True)

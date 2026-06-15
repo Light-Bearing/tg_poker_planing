@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
-from ppbot.game import AVAILABLE_POINTS, Game
+from ppbot.game import AVAILABLE_POINTS, DEFAULT_SCALE, SCALE_NAMES, SCALES, Game
 
 
 def game_to_web_response(game: Game, session_id: str) -> dict:
@@ -32,7 +32,9 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
         "votes": votes,
         "vote_count": len(game.votes),
         "average": game.to_dict().get("average", 0),
-        "available_points": AVAILABLE_POINTS,
+        "available_points": game.get_points(),
+        "scale_name": game.scale_name,
+        "scale_names": SCALE_NAMES,
     }
 
 
@@ -66,7 +68,15 @@ def enrich_session_response(game: Game, session_id: str) -> dict:
 
 
 async def web_index(request: Request):
-    return state.templates.TemplateResponse("index.html", {"request": request, "available_points": AVAILABLE_POINTS})
+    return state.templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "available_points": AVAILABLE_POINTS,
+            "scale_names": SCALE_NAMES,
+            "scales": SCALES,
+        },
+    )
 
 
 async def api_create_session(request: Request):
@@ -80,13 +90,43 @@ async def api_create_session(request: Request):
 
         session_id = str(uuid.uuid4())[:8]
         initiator = {"id": f"web_{username}", "first_name": username, "username": username}
-        game = state.storage.new_game(WEB_CHAT_ID, session_id, initiator, text)
+        scale_name = data.get("scale_name", "").strip() or None
+
+        # Load initiator's saved custom scale if available
+        custom_points = None
+        if scale_name == "custom":
+            custom_points = await state.storage.get_custom_scale(f"web_{username}")
+
+        game = state.storage.new_game(
+            WEB_CHAT_ID, session_id, initiator, text, scale_name=scale_name, custom_points=custom_points
+        )
         await state.storage.save_game(game)
 
         manager.register_user(session_id, username)
         return JSONResponse({"session_id": session_id, **enrich_session_response(game, session_id)})
     except Exception as e:
         logger.error(f"Error creating session: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def api_set_scale(request: Request):
+    session_id = request.path_params["session_id"]
+    try:
+        data = await request.json()
+        scale_name = data.get("scale_name", "").strip()
+        if not scale_name:
+            return JSONResponse({"error": "scale_name is required"}, status_code=400)
+
+        game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+        if not game:
+            return JSONResponse({"error": "Session not found"}, status_code=404)
+
+        game.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
+        await state.storage.save_game(game)
+        await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
+        return JSONResponse(enrich_session_response(game, session_id))
+    except Exception as e:
+        logger.error(f"Error setting scale: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -166,6 +206,33 @@ async def api_reveal(request: Request):
         return JSONResponse(enrich_session_response(game, session_id))
     except Exception as e:
         logger.error(f"Error revealing: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def api_get_custom_scale(request: Request):
+    username = request.query_params.get("username", "").strip()
+    if not username:
+        return JSONResponse({"error": "username is required"}, status_code=400)
+    points = await state.storage.get_custom_scale(f"web_{username}")
+    return JSONResponse({"points": points or []})
+
+
+async def api_save_custom_scale(request: Request):
+    try:
+        data = await request.json()
+        username = data.get("username", "").strip()
+        points = data.get("points", [])
+        if not username:
+            return JSONResponse({"error": "username is required"}, status_code=400)
+        if not isinstance(points, list) or not all(isinstance(p, str) for p in points):
+            return JSONResponse({"error": "points must be a list of strings"}, status_code=400)
+        if len(points) < 2:
+            return JSONResponse({"error": "At least 2 points are required"}, status_code=400)
+
+        await state.storage.save_custom_scale(f"web_{username}", points)
+        return JSONResponse({"ok": True, "points": points})
+    except Exception as e:
+        logger.error(f"Error saving custom scale: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

@@ -5,7 +5,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import state
 from config import DB_PATH, GREETING, PROXY_URL, TOKEN, logger
-from ppbot.game import Game
+from ppbot.game import DEFAULT_SCALE, SCALES, Game
 
 
 async def init_bot():
@@ -14,6 +14,25 @@ async def init_bot():
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(GREETING)
+
+
+def _parse_scale_from_args(args: list[str]) -> tuple[str, list[str]]:
+    """Extract --scale NAME from args, return (scale_name, remaining_args)."""
+    remaining = list(args)
+    scale_name = DEFAULT_SCALE
+    for i, arg in enumerate(remaining):
+        if arg.startswith("--scale="):
+            scale_name = arg.split("=", 1)[1]
+            remaining.pop(i)
+            break
+        elif arg == "--scale" and i + 1 < len(remaining):
+            scale_name = remaining[i + 1]
+            remaining.pop(i)  # --scale
+            remaining.pop(i)  # value
+            break
+    if scale_name not in SCALES:
+        scale_name = DEFAULT_SCALE
+    return scale_name, remaining
 
 
 async def poker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -25,11 +44,13 @@ async def poker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "first_name": update.effective_user.first_name,
             "username": update.effective_user.username,
         }
-        text = " ".join(context.args) if context.args else "No description provided"
+        raw_args = list(context.args or [])
+        scale_name, text_args = _parse_scale_from_args(raw_args)
+        text = " ".join(text_args) if text_args else "No description provided"
         if not text.strip():
             text = update.message.text.split("\n", 1)[1] if "\n" in update.message.text else "No description provided"
 
-        game = state.storage.new_game(chat_id, message_id, initiator, text)
+        game = state.storage.new_game(chat_id, message_id, initiator, text, scale_name=scale_name)
         message = await update.message.reply_text(game.get_text(), reply_markup=game.get_markup())
         game.reply_message_id = message.message_id
         await state.storage.save_game(game)
@@ -42,6 +63,29 @@ async def russian_poker_command(update: Update, context: ContextTypes.DEFAULT_TY
     return await poker_command(update, context)
 
 
+async def handle_scale_click(query, data, chat_id):
+    """Cycle the game's scale to the next preset."""
+    vote_id = data.split("-", 2)[2] if data.count("-") >= 2 else data.removeprefix("scale-cycle-")
+    game = await state.storage.get_game(chat_id, vote_id)
+    if not game:
+        return await query.answer("Game not found", show_alert=True)
+
+    # Advance to the next scale in the list
+    scale_keys = list(SCALES.keys())
+    current_idx = scale_keys.index(game.scale_name) if game.scale_name in scale_keys else -1
+    next_idx = (current_idx + 1) % len(scale_keys)
+    game.scale_name = scale_keys[next_idx]
+
+    try:
+        await query.edit_message_text(game.get_text(), reply_markup=game.get_markup())
+        await state.storage.save_game(game)
+    except Exception as e:
+        if "message is not modified" in str(e).lower():
+            await query.answer("No changes to apply")
+        else:
+            raise e
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -50,6 +94,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id = query.message.chat_id
         if data.startswith("vote-click-"):
             await handle_vote_click(query, data, chat_id)
+        elif data.startswith("scale-cycle-"):
+            await handle_scale_click(query, data, chat_id)
         elif any(
             data.startswith(op + "-click-")
             for op in [Game.OP_REVEAL, Game.OP_RESTART, Game.OP_RESTART_NEW, Game.OP_REVEAL_NEW]

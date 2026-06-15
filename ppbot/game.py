@@ -28,6 +28,21 @@ AVAILABLE_POINTS = [
 HALF_POINTS = len(AVAILABLE_POINTS) // 2
 ALL_MARKS = "♥♦♠♣"
 
+# Standard scale presets
+SCALES = {
+    "custom": AVAILABLE_POINTS,
+    "fibonacci": ["1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "❔", "☕"],
+    "powers_of_2": ["1", "2", "4", "8", "16", "32", "64", "❔", "☕"],
+    "tshirt": ["XS", "S", "M", "L", "XL", "XXL", "❔", "☕"],
+}
+SCALE_NAMES = {
+    "custom": "Custom",
+    "fibonacci": "Fibonacci",
+    "powers_of_2": "Powers of 2",
+    "tshirt": "T-shirt",
+}
+DEFAULT_SCALE = "custom"
+
 
 class Vote:
     def __init__(self):
@@ -62,7 +77,7 @@ class Game:
     OP_REVEAL = "reveal"
     OP_REVEAL_NEW = "reveal-new"
 
-    def __init__(self, chat_id, vote_id, initiator, text):
+    def __init__(self, chat_id, vote_id, initiator, text, scale_name=None, custom_points=None):
         self.chat_id = chat_id
         self.vote_id = vote_id
         self.initiator = initiator
@@ -70,6 +85,8 @@ class Game:
         self.reply_message_id = 0
         self.votes = collections.defaultdict(Vote)
         self.revealed = False
+        self.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
+        self.custom_points = custom_points or []
 
     def add_vote(self, initiator, point):
         user_id = initiator.get("id") or initiator.get("user_id")
@@ -77,9 +94,18 @@ class Game:
             user_id = self._initiator_str(initiator)
         self.votes[str(user_id)].set(point)
 
+    def get_points(self):
+        """Return the point scale used by this game."""
+        if self.scale_name == "custom" and self.custom_points:
+            return self.custom_points
+        return SCALES.get(self.scale_name, AVAILABLE_POINTS)
+
     def get_text(self):
-        result = "{} for:\n{}\nInitiator: {}".format(
-            "Vote" if not self.revealed else "Results", self.text, self._initiator_str(self.initiator)
+        result = "{} for:\n{}\nInitiator: {}\nScale: {}".format(
+            "Vote" if not self.revealed else "Results",
+            self.text,
+            self._initiator_str(self.initiator),
+            SCALE_NAMES.get(self.scale_name, self.scale_name),
         )
         if self.votes:
             votes_str = "\n".join(
@@ -92,13 +118,20 @@ class Game:
     def get_markup(self):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+        points = self.get_points()
+        half = len(points) // 2
+
         # Создаем кнопки для оценок
         points_keys = []
-        for point in AVAILABLE_POINTS:
+        for point in points:
             points_keys.append(InlineKeyboardButton(text=point, callback_data=f"vote-click-{self.vote_id}-{point}"))
 
         # Создаем кнопки управления
+        scale_name = SCALE_NAMES.get(self.scale_name, self.scale_name)
         control_buttons = [
+            [
+                InlineKeyboardButton(text=f"📐 {scale_name}", callback_data=f"scale-cycle-{self.vote_id}"),
+            ],
             [
                 InlineKeyboardButton(text="Restart", callback_data=f"{self.OP_RESTART}-click-{self.vote_id}"),
                 InlineKeyboardButton(text="Restart 🆕", callback_data=f"{self.OP_RESTART_NEW}-click-{self.vote_id}"),
@@ -109,8 +142,9 @@ class Game:
             ],
         ]
 
-        # Разделяем кнопки оценок на две строки
-        keyboard = [points_keys[:HALF_POINTS], points_keys[HALF_POINTS:], *control_buttons]
+        # Разделяем кнопки оценок на две строки (или одну, если мало)
+        point_rows = [points_keys[i : i + half] for i in range(0, len(points), half)]
+        keyboard = [*point_rows, *control_buttons]
 
         return InlineKeyboardMarkup(keyboard)
 
@@ -128,6 +162,8 @@ class Game:
             "text": self.text,
             "reply_message_id": self.reply_message_id,
             "revealed": self.revealed,
+            "scale_name": self.scale_name,
+            "custom_points": self.custom_points,
             "votes": {user_id: vote.to_dict() for user_id, vote in self.votes.items()},
         }
 
@@ -149,7 +185,14 @@ class Game:
 
     @classmethod
     def from_dict(cls, chat_id, vote_id, dct):
-        res = cls(chat_id, vote_id, dct["initiator"], dct["text"])
+        res = cls(
+            chat_id,
+            vote_id,
+            dct["initiator"],
+            dct["text"],
+            scale_name=dct.get("scale_name"),
+            custom_points=dct.get("custom_points", []),
+        )
         for user_id, vote in dct["votes"].items():
             res.votes[user_id] = Vote.from_dict(vote)
         res.revealed = dct["revealed"]
@@ -170,10 +213,16 @@ class GameRegistry:
                 PRIMARY KEY (chat_id, game_id)
             )
         """)
+        await self._db.execute("""
+            CREATE TABLE IF NOT EXISTS custom_scales (
+                initiator_key TEXT PRIMARY KEY,
+                points TEXT NOT NULL
+            )
+        """)
         await self._db.commit()
 
-    def new_game(self, chat_id, incoming_message_id: str, initiator: dict, text: str):
-        return Game(chat_id, incoming_message_id, initiator, text)
+    def new_game(self, chat_id, incoming_message_id, initiator, text, scale_name=None, custom_points=None):
+        return Game(chat_id, incoming_message_id, initiator, text, scale_name=scale_name, custom_points=custom_points)
 
     async def get_game(self, chat_id, incoming_message_id: str) -> Game:
         query = "SELECT json_data FROM games WHERE chat_id = ? AND game_id = ?"
@@ -188,6 +237,21 @@ class GameRegistry:
             "INSERT OR REPLACE INTO games VALUES (?, ?, ?)", (game.chat_id, game.vote_id, json.dumps(game.to_dict()))
         )
         await self._db.commit()
+
+    async def save_custom_scale(self, initiator_key: str, points: list[str]):
+        await self._db.execute(
+            "INSERT OR REPLACE INTO custom_scales VALUES (?, ?)", (initiator_key, json.dumps(points))
+        )
+        await self._db.commit()
+
+    async def get_custom_scale(self, initiator_key: str) -> list[str] | None:
+        async with self._db.execute(
+            "SELECT points FROM custom_scales WHERE initiator_key = ?", (initiator_key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return json.loads(row[0])
+            return None
 
     async def close(self):
         if self._db is not None:

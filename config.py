@@ -20,7 +20,9 @@ Use /poker task url or description to start game.
 Multiline is also supported:
 /poker line1
 line2
-Available scales: 1,2,3,5,8,13,20,40,❔,☕
+
+Available scales: Fibonacci, Powers of 2, T-shirt, Custom
+Use --scale name to choose: /poker task --scale fibonacci
 """
 
 if not TOKEN:

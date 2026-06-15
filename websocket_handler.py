@@ -5,6 +5,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
+from ppbot.game import SCALES
 from web_api import enrich_session_response
 
 
@@ -61,7 +62,8 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 try:
                     msg = json.loads(data)
-                    if msg.get("type") == "join":
+                    msg_type = msg.get("type")
+                    if msg_type == "join":
                         username = msg.get("username")
                         if username:
                             is_new = manager.register_user(session_id, username)
@@ -80,6 +82,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                         session_id,
                                         {"type": "update", "data": enrich_session_response(game, session_id)},
                                     )
+                    elif msg_type == "set_scale":
+                        scale_name = msg.get("scale_name", "")
+                        if game and scale_name in SCALES:
+                            game.scale_name = scale_name
+                            await state.storage.save_game(game)
+                            await manager.broadcast(
+                                session_id,
+                                {"type": "update", "data": enrich_session_response(game, session_id)},
+                            )
                 except Exception:
                     pass
     except WebSocketDisconnect:

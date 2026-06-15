@@ -1,6 +1,6 @@
 import pytest
 
-from ppbot.game import ALL_MARKS, Game, GameRegistry, Vote
+from ppbot.game import ALL_MARKS, AVAILABLE_POINTS, SCALES, Game, GameRegistry, Vote
 
 
 class TestVote:
@@ -78,6 +78,88 @@ class TestGame:
         assert len(sample_game.votes) == 2  # initiator + user 1
         assert sample_game.votes["1"].point == "8"
         assert sample_game.votes["1"].version == 1
+
+    def test_default_scale_is_custom(self):
+        game = Game(-100, "s1", {"id": 1}, "task")
+        assert game.scale_name == "custom"
+        assert game.get_points() == [
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "14",
+            "16",
+            "18",
+            "20",
+            "28",
+            "40",
+            "❔",
+            "☕",
+        ]
+
+    def test_scale_fibonacci(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="fibonacci")
+        assert game.scale_name == "fibonacci"
+        assert "5" in game.get_points()
+        assert "13" in game.get_points()
+        assert "4" not in game.get_points()
+
+    def test_scale_tshirt(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="tshirt")
+        assert "XS" in game.get_points()
+        assert "XXL" in game.get_points()
+
+    def test_get_text_shows_scale(self):
+        game = Game(-100, "s1", {"id": 1, "first_name": "A", "username": "a"}, "task", scale_name="fibonacci")
+        text = game.get_text()
+        assert "Scale: Fibonacci" in text
+
+    def test_custom_points_returns_custom_list(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="custom", custom_points=["10", "20", "30", "❔", "☕"])
+        assert game.get_points() == ["10", "20", "30", "❔", "☕"]
+
+    def test_custom_points_empty_uses_default(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="custom", custom_points=[])
+        assert game.get_points() == AVAILABLE_POINTS
+
+    def test_custom_points_ignored_for_non_custom_scale(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="fibonacci", custom_points=["10", "20"])
+        assert game.get_points() == SCALES["fibonacci"]
+
+    def test_custom_points_in_to_dict(self, sample_initiator):
+        game = Game(-100, "s1", sample_initiator, "task", scale_name="custom", custom_points=["X", "Y", "Z"])
+        d = game.to_dict()
+        assert d["custom_points"] == ["X", "Y", "Z"]
+
+    def test_custom_points_restored_from_from_dict(self, sample_initiator):
+        game = Game(-100, "s1", sample_initiator, "task", scale_name="custom", custom_points=["A", "B", "C"])
+        d = game.to_dict()
+        restored = Game.from_dict(-100, "s1", d)
+        assert restored.custom_points == ["A", "B", "C"]
+        assert restored.get_points() == ["A", "B", "C"]
+
+    def test_scale_persists_in_to_dict(self, sample_initiator):
+        game = Game(-100, "s1", sample_initiator, "task", scale_name="fibonacci")
+        d = game.to_dict()
+        assert d["scale_name"] == "fibonacci"
+
+    def test_scale_restored_from_from_dict(self, sample_initiator):
+        game = Game(-100, "s1", sample_initiator, "task", scale_name="powers_of_2")
+        d = game.to_dict()
+        restored = Game.from_dict(-100, "s1", d)
+        assert restored.scale_name == "powers_of_2"
+
+    def test_invalid_scale_falls_back_to_default(self):
+        game = Game(-100, "s1", {"id": 1}, "task", scale_name="nonexistent")
+        assert game.scale_name == "custom"
 
     def test_get_text_before_reveal(self, sample_game):
         text = sample_game.get_text()
@@ -280,3 +362,28 @@ class TestGameRegistry:
         assert loaded2 is not None
         assert loaded1.text == "task1"
         assert loaded2.text == "task2"
+
+    @pytest.mark.asyncio
+    async def test_save_and_get_custom_scale(self):
+        await self.registry.init_db(self.db_path)
+        initiator_key = "web_Alice"
+        points = ["10", "20", "30", "50", "100"]
+        await self.registry.save_custom_scale(initiator_key, points)
+
+        loaded = await self.registry.get_custom_scale(initiator_key)
+        assert loaded == points
+
+    @pytest.mark.asyncio
+    async def test_get_custom_scale_missing(self):
+        await self.registry.init_db(self.db_path)
+        result = await self.registry.get_custom_scale("web_nobody")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_save_custom_scale_overwrites(self):
+        await self.registry.init_db(self.db_path)
+        key = "web_Bob"
+        await self.registry.save_custom_scale(key, ["1", "2"])
+        await self.registry.save_custom_scale(key, ["3", "4", "5"])
+        loaded = await self.registry.get_custom_scale(key)
+        assert loaded == ["3", "4", "5"]
