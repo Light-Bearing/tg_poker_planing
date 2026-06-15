@@ -3,7 +3,7 @@
 NAME=wmsout_planing_poker_bot
 DB_LOCATION=/db/
 DB_NAME=tg_pp_bot.db
-PP_BOT_TOKEN=${PP_BOT_TOKEN_REMOVED}
+PP_BOT_TOKEN=${PP_BOT_TOKEN:-PP_BOT_TOKEN_REMOVED}
 # PP_BOT_TOKEN_REMOVED
 
 docker build -t ${NAME} .

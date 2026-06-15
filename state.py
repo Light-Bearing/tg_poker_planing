@@ -1,0 +1,2 @@
+storage = None
+templates = None

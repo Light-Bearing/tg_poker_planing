@@ -2,11 +2,12 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Planning Poker</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+    <a href="#joinScreen" class="skip-link">Перейти к содержимому</a>
     <div class="container">
         <div class="header">
             <div class="header-left">
@@ -14,12 +15,12 @@
             </div>
             <div class="header-right">
                 <div id="connectionStatus" class="connection-status disconnected">OFFLINE</div>
-                <button class="header-btn sound-btn" onclick="toggleSound()" title="Включить/выключить звуки">
+                <button class="header-btn sound-btn" onclick="toggleSound()" title="Включить/выключить звуки" aria-label="Включить или выключить звук">
                     <span class="sound-indicator"></span>
-                    <span id="soundIcon">🔊</span>
+                    <span id="soundIcon" role="img" aria-label="Иконка звука">🔊</span>
                     <span id="soundText">ЗВУК</span>
                 </button>
-                <button class="header-btn" onclick="toggleTheme()">
+                <button class="header-btn" onclick="toggleTheme()" aria-label="Переключить тему">
                     <span id="themeIcon">☀</span> <span id="themeText">СВЕТЛАЯ</span>
                 </button>
                 <button class="header-btn leave-btn hidden" id="leaveBtn" onclick="leaveSession()">✕ ВЫХОД</button>
@@ -137,6 +138,8 @@
                         </div>
                         <div class="actions" id="initiatorActions" style="display:none;">
                             <button class="btn btn-outline" onclick="toggleNewTaskForm()">▸ НОВАЯ ЗАДАЧА</button>
+                            <button class="btn btn-warning mobile-control-btn" onclick="restartSession()">↻ СБРОС</button>
+                            <button class="btn btn-success mobile-control-btn" onclick="revealCards()">◈ ОТКРЫТЬ</button>
                         </div>
                         <div id="newTaskForm" class="new-task-form">
                             <div class="form-group" style="margin-bottom: 10px;">
@@ -212,10 +215,10 @@
     </div>
     
     <!-- TOAST КОНТЕЙНЕР -->
-    <div id="toastContainer" class="toast-container"></div>
+    <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
     
     <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ -->
-    <div id="confirmModal" class="confirm-modal hidden">
+    <div id="confirmModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" tabindex="-1">
         <div class="confirm-backdrop" onclick="closeConfirmModal(false)"></div>
         <div class="confirm-dialog">
             <div class="confirm-header">

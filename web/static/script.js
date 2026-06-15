@@ -25,6 +25,7 @@ class ToastManager {
         const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
+        toast.setAttribute('role', 'alert');
         toast.innerHTML = `
             <div class="toast-icon">${icons[type] || 'ℹ'}</div>
             <div class="toast-body">
@@ -62,11 +63,13 @@ class ToastManager {
 class ConfirmManager {
     constructor() {
         this.resolvePromise = null;
+        this.previousFocus = null;
     }
     
     show(message, title = 'ПОДТВЕРЖДЕНИЕ', okText = 'ПОДТВЕРДИТЬ', cancelText = 'ОТМЕНА') {
         return new Promise(resolve => {
             this.resolvePromise = resolve;
+            this.previousFocus = document.activeElement;
             const modal = document.getElementById('confirmModal');
             document.getElementById('confirmTitle').textContent = title;
             document.getElementById('confirmMessage').textContent = message;
@@ -81,6 +84,10 @@ class ConfirmManager {
     close(result) {
         const modal = document.getElementById('confirmModal');
         modal.classList.add('hidden');
+        if (this.previousFocus) {
+            this.previousFocus.focus();
+            this.previousFocus = null;
+        }
         if (this.resolvePromise) {
             this.resolvePromise(result);
             this.resolvePromise = null;
@@ -456,6 +463,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     if (state.username && sessionId) joinOrCreateSession();
+    
+    // Escape closes modal
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.getElementById('confirmModal').classList.contains('hidden')) {
+            closeConfirmModal(false);
+        }
+    });
 });
 
 async function joinOrCreateSession() {
@@ -471,6 +485,12 @@ async function joinOrCreateSession() {
     
     state.username = username;
     localStorage.setItem('pp_username', username);
+    
+    const btn = document.querySelector('.btn-primary');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.textContent = '...';
     
     try {
         if (sessionId) {
@@ -502,6 +522,10 @@ async function joinOrCreateSession() {
         }
     } catch (error) {
         toast.error(error.message, 'НЕ УДАЛОСЬ');
+    } finally {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+        btn.textContent = originalText;
     }
 }
 
@@ -601,6 +625,7 @@ function updateSessionDisplay(session) {
         const btn = document.createElement('button');
         btn.className = 'point-btn';
         btn.textContent = point;
+        btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
         
         const myVote = session.votes.find(v => v.user_id === `web_${state.username}`);
@@ -736,6 +761,11 @@ function renderParticipants(session) {
 
 async function castVote(point) {
     if (!state.sessionId) return;
+    const btn = document.querySelector(`.point-btn[data-point="${point}"]`);
+    if (btn) {
+        document.querySelectorAll('.point-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+    }
     try {
         const response = await fetch(`/api/sessions/${state.sessionId}/vote`, {
             method: 'POST',
@@ -745,11 +775,13 @@ async function castVote(point) {
         if (!response.ok) {
             const err = await response.json();
             toast.error(err.error || 'Неизвестная ошибка', 'ОШИБКА ГОЛОСА');
+            if (btn) btn.classList.remove('selected');
         } else {
             soundManager.playVote();
         }
     } catch (error) { 
         toast.error(error.message, 'НЕТ СВЯЗИ');
+        if (btn) btn.classList.remove('selected');
     }
 }
 
@@ -766,9 +798,12 @@ async function startNewTask() {
         document.getElementById('newTaskText').focus();
         return; 
     }
+    const btn = document.querySelector('#newTaskForm .btn-primary');
+    if (btn) btn.disabled = true;
     await restartSession(newText);
     toggleNewTaskForm();
     document.getElementById('newTaskText').value = '';
+    if (btn) btn.disabled = false;
 }
 
 async function restartSession(newText = null) {
@@ -782,6 +817,9 @@ async function restartSession(newText = null) {
         );
         if (!confirmed) return;
     }
+    
+    const btn = document.querySelector('.btn-warning');
+    if (btn) btn.disabled = true;
     
     try {
         const payload = { username: state.username };
@@ -806,10 +844,14 @@ async function restartSession(newText = null) {
         setTimeout(() => document.body.classList.remove('reset-effect'), 1400);
     } catch (error) { 
         toast.error(error.message, 'НЕТ СВЯЗИ');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 }
 
 async function revealCards() {
+    const btn = document.querySelector('.btn-success');
+    btn.disabled = true;
     try {
         const response = await fetch(`/api/sessions/${state.sessionId}/reveal`, {
             method: 'POST',
@@ -822,6 +864,8 @@ async function revealCards() {
         }
     } catch (error) { 
         toast.error(error.message, 'НЕТ СВЯЗИ');
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -849,6 +893,7 @@ function leaveSession() {
     
     // Прокручиваем joinScreen наверх, чтобы было видно заголовок
     document.getElementById('joinScreen').scrollTop = 0;
+    document.getElementById('username').focus();
 }
 
 function copySessionLink() {
