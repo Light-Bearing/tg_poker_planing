@@ -427,6 +427,20 @@ body::before {
     box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.participant-card.voted {
+    border-color: rgba(6, 214, 160, 0.3);
+}
+
+.vote-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 4px var(--success);
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
 .participant-card-header {
     display: flex;
     align-items: center;
@@ -598,6 +612,21 @@ body::before {
 .btn-outline { background: transparent; color: var(--text-primary); }
 .btn-outline:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--accent); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ========== LOADING SPINNER ========== */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
 
 /* ========== JOIN SCREEN ========== */
 #joinScreen {
@@ -994,10 +1023,6 @@ body::before {
 }
 .form-group textarea { resize: vertical; min-height: 80px; }
 
-.new-task-form { margin-top: 12px; padding: 14px; background: var(--bg-input); border-radius: 2px; border: 1px solid var(--accent); display: none; }
-.new-task-form.active { display: block; animation: slideDown 0.3s ease; }
-@keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
-
 .hidden { display: none !important; }
 
 /* ========== TOAST NOTIFICATIONS ========== */
@@ -1327,9 +1352,6 @@ body::before {
     pointer-events: none;
 }
 
-/* ========== MOBILE CONTROLS ========== */
-.mobile-control-btn { display: none; }
-
 /* ========== SKIP TO CONTENT ========== */
 .skip-link {
     position: absolute;
@@ -1354,6 +1376,96 @@ body::before {
 /* ========== ANTI-JITTER FIX ========== */
 #joinScreen * {
     transform: none !important;
+}
+
+/* ========== HISTOGRAM ========== */
+.histogram {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.histogram-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.histogram-label {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    font-weight: 700;
+    min-width: 36px;
+    text-align: right;
+    color: var(--text-primary);
+}
+
+.histogram-label.special {
+    color: var(--warning);
+}
+
+.histogram-bar-track {
+    flex: 1;
+    height: 20px;
+    background: var(--bg-input);
+    border-radius: 2px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+
+.histogram-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    min-width: 2px;
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.histogram-count {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 24px;
+    text-align: left;
+}
+
+/* ========== NEW TASK INLINE ========== */
+.new-task-inline {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+}
+
+.new-task-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-size: 14px;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    transition: border-color 0.2s;
+}
+
+.new-task-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.new-task-input::placeholder {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+/* ========== JOIN BUTTON ========== */
+.join-btn {
+    width: 100%;
+    padding: 12px;
 }
 
 /* ========== SCROLLBAR ========== */
@@ -1395,8 +1507,6 @@ body::before {
 
     .stat-card .value { font-size: 1.6em; }
     .stat-card .label { font-size: 0.7em; }
-
-    .mobile-control-btn { display: flex; }
 
     #joinScreen {
         max-width: 100%;

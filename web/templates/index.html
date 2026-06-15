@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Planning Poker</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◇</text></svg>">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -49,7 +50,7 @@
                         <label for="taskText">Описание задачи:</label>
                         <textarea id="taskText" placeholder="Опишите задачу для оценки..."></textarea>
                     </div>
-                    <button class="btn btn-primary" style="width: 100%; padding: 12px;" onclick="joinOrCreateSession()">▸ ИНИЦИАЛИЗИРОВАТЬ</button>
+                    <button class="btn btn-primary join-btn" onclick="joinOrCreateSession()">▸ СОЗДАТЬ КОМНАТУ</button>
                 </div>
 
                 <div class="how-column">
@@ -139,19 +140,8 @@
                         </h2>
                         <div class="task-body">
                             <div class="task-text" id="taskDisplay"></div>
-                        </div>
-                        <div class="actions" id="initiatorActions" style="display:none;">
-                            <button class="btn btn-outline" onclick="toggleNewTaskForm()">▸ НОВАЯ ЗАДАЧА</button>
-                            <button class="btn btn-warning mobile-control-btn" onclick="restartSession()">↻ СБРОС</button>
-                            <button class="btn btn-success mobile-control-btn" onclick="revealCards()">◈ ОТКРЫТЬ</button>
-                        </div>
-                        <div id="newTaskForm" class="new-task-form">
-                            <div class="form-group" style="margin-bottom: 10px;">
-                                <textarea id="newTaskText" placeholder="Новая задача..." style="min-height: 60px;"></textarea>
-                            </div>
-                            <div style="display: flex; gap: 8px;">
-                                <button class="btn btn-primary" onclick="startNewTask()">▸ ЗАПУСК</button>
-                                <button class="btn btn-outline" onclick="toggleNewTaskForm()">ОТМЕНА</button>
+                            <div id="newTaskInline" class="new-task-inline" style="display:none;">
+                                <input type="text" id="newTaskText" placeholder="Новая задача — введите и нажмите Enter" class="new-task-input">
                             </div>
                         </div>
                     </div>
@@ -173,6 +163,7 @@
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
                         <div style="display: flex; gap: 8px; flex-direction: column;">
+                            <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
                             <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>
                             <button class="btn btn-success" onclick="revealCards()">◈ ОТКРЫТЬ</button>
                         </div>
@@ -198,12 +189,16 @@
                         </div>
                     </div>
                     
-                    <div class="card" id="resultCard" style="display:none; cursor: pointer;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
+                    <div class="card" id="resultCard" style="display:none;" onclick="copyResult()" title="Нажмите, чтобы скопировать оценку">
                         <h2><span class="diamond"></span> РЕЗУЛЬТАТ</h2>
                         <div style="text-align: center; padding: 10px;">
                             <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue">-</div>
                             <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">Итоговая оценка</div>
                         </div>
+                    </div>
+                    <div class="card" id="histogramCard" style="display:none;">
+                        <h2><span class="diamond"></span> РАСПРЕДЕЛЕНИЕ</h2>
+                        <div class="histogram" id="histogramContainer"></div>
                     </div>
                 </div>
                 
