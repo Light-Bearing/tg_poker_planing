@@ -569,6 +569,16 @@ function toggleTaskField() {
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskGroup = document.getElementById('taskGroup');
     taskGroup.style.display = sessionId ? 'none' : 'block';
+    updateJoinButtonText();
+}
+
+function updateJoinButtonText() {
+    const btn = document.querySelector('.btn-primary');
+    if (!btn) return;
+    const sessionId = document.getElementById('sessionId').value.trim();
+    btn.innerHTML = sessionId
+        ? '▸ ВОЙТИ В КОМНАТУ'
+        : '▸ СОЗДАТЬ КОМНАТУ';
 }
 
 function formatTaskText(text) {
@@ -602,6 +612,7 @@ document.addEventListener('DOMContentLoaded', () => {
     soundManager.setEnabled(state.soundEnabled);
     
     document.getElementById('username').value = state.username;
+    updateJoinButtonText();
     
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session');
@@ -612,13 +623,20 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (state.username && sessionId) joinOrCreateSession();
     
-    // Escape closes modals
+    // Escape closes modals; Enter submits new task
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             if (!document.getElementById('confirmModal').classList.contains('hidden')) {
                 closeConfirmModal(false);
             } else if (!document.getElementById('scaleEditorModal').classList.contains('hidden')) {
                 closeCustomScaleEditor();
+            }
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+            const input = document.getElementById('newTaskText');
+            if (input === document.activeElement && input.value.trim()) {
+                e.preventDefault();
+                startNewTask();
             }
         }
     });
@@ -640,10 +658,10 @@ async function joinOrCreateSession() {
     localStorage.setItem('pp_username', username);
     
     const btn = document.querySelector('.btn-primary');
-    const originalText = btn.textContent;
+    const originalHtml = btn.innerHTML;
     btn.disabled = true;
     btn.classList.add('loading');
-    btn.textContent = '...';
+    btn.innerHTML = '<span class="spinner"></span>';
     
     try {
         if (sessionId) {
@@ -692,7 +710,8 @@ async function joinOrCreateSession() {
     } finally {
         btn.disabled = false;
         btn.classList.remove('loading');
-        btn.textContent = originalText;
+        btn.innerHTML = originalHtml;
+        updateJoinButtonText();
     }
 }
 
@@ -817,21 +836,31 @@ function updateSessionDisplay(session) {
         averageCard.style.display = 'block';
         document.getElementById('averageValue').textContent = session.average.toFixed(1);
         resultCard.style.display = 'block';
+        resultCard.style.cursor = 'pointer';
         document.getElementById('resultValue').textContent = session.average.toFixed(1);
         document.getElementById('resultLabel').textContent = 'НАЖМИТЕ, ЧТОБЫ СКОПИРОВАТЬ';
+        renderHistogram(session);
     } else {
         averageCard.style.display = 'none';
         resultCard.style.display = 'none';
+        resultCard.style.cursor = 'default';
+        document.getElementById('histogramCard').style.display = 'none';
     }
     
     const totalConnected = session.participants ? session.participants.filter(p => p.online).length : 0;
-    const percent = totalConnected > 0 ? Math.min(100, (session.vote_count / totalConnected) * 100) : 0;
+    let percent = 0;
+    let labelText = '';
+    if (totalConnected === 0) {
+        percent = 0;
+        labelText = '— / — ОЖИДАНИЕ УЧАСТНИКОВ';
+    } else {
+        percent = Math.min(100, (session.vote_count / totalConnected) * 100);
+        labelText = `${session.vote_count} / ${totalConnected} ПРОГОЛОСОВАЛО`;
+    }
     document.getElementById('progressFill').style.width = percent + '%';
-    document.getElementById('progressLabel').textContent = `${session.vote_count} / ${totalConnected} ПРОГОЛОСОВАЛО`;
+    document.getElementById('progressLabel').textContent = labelText;
     
     renderParticipants(session);
-    
-    document.getElementById('initiatorActions').style.display = state.isInitiator ? 'flex' : 'none';
     
     const controlCard = document.getElementById('initiatorControlCard');
     controlCard.style.display = state.isInitiator ? 'block' : 'none';
@@ -917,12 +946,15 @@ function renderParticipants(session) {
             voteDisplay = `<span class="vote-value revealed${extraClass}">${point}</span>`;
         }
 
+        const hasVoted = !!p.vote;
+        const votedClass = !session.revealed && hasVoted ? 'voted' : '';
         return `
-            <div class="participant-card ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''}">
+            <div class="participant-card ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''} ${votedClass}">
                 <div class="participant-card-header">
                     <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
                     <span class="participant-name" title="${p.username}">${p.username}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
+                    ${!session.revealed && hasVoted ? '<span class="vote-dot" title="Проголосовал"></span>' : ''}
                 </div>
                 <div class="participant-vote-area">
                     ${voteDisplay}
@@ -930,6 +962,46 @@ function renderParticipants(session) {
             </div>
         `;
     }).join('');
+}
+
+function renderHistogram(session) {
+    const card = document.getElementById('histogramCard');
+    const container = document.getElementById('histogramContainer');
+    if (!card || !container || !session.revealed) return;
+
+    // Count votes per point value
+    const counts = {};
+    let maxCount = 0;
+    for (const v of session.votes) {
+        const point = v.real_point || v.point;
+        counts[point] = (counts[point] || 0) + 1;
+        if (counts[point] > maxCount) maxCount = counts[point];
+    }
+
+    const entries = Object.entries(counts).sort((a, b) => {
+        const na = parseFloat(a[0]);
+        const nb = parseFloat(b[0]);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        if (!isNaN(na)) return -1;
+        if (!isNaN(nb)) return 1;
+        return a[0].localeCompare(b[0]);
+    });
+
+    container.innerHTML = entries.map(([point, count]) => {
+        const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
+        const isSpecial = SPECIAL_POINTS.includes(point);
+        return `
+            <div class="histogram-row">
+                <span class="histogram-label ${isSpecial ? 'special' : ''}">${point}</span>
+                <div class="histogram-bar-track">
+                    <div class="histogram-bar" style="width: ${pct}%"></div>
+                </div>
+                <span class="histogram-count">${count}</span>
+            </div>
+        `;
+    }).join('');
+
+    card.style.display = 'block';
 }
 
 async function castVote(point) {
@@ -958,25 +1030,28 @@ async function castVote(point) {
     }
 }
 
-function toggleNewTaskForm() {
-    const form = document.getElementById('newTaskForm');
-    form.classList.toggle('active');
-    if (form.classList.contains('active')) document.getElementById('newTaskText').focus();
+function toggleNewTaskInput() {
+    const container = document.getElementById('newTaskInline');
+    const input = document.getElementById('newTaskText');
+    if (container.style.display === 'none' || !container.style.display) {
+        container.style.display = 'block';
+        setTimeout(() => input.focus(), 50);
+    } else {
+        container.style.display = 'none';
+        input.value = '';
+    }
 }
 
 async function startNewTask() {
     const newText = document.getElementById('newTaskText').value.trim();
     if (!newText) { 
         toast.warning('Опишите новую задачу');
-        document.getElementById('newTaskText').focus();
         return; 
     }
-    const btn = document.querySelector('#newTaskForm .btn-primary');
-    if (btn) btn.disabled = true;
-    await restartSession(newText);
-    toggleNewTaskForm();
+    const container = document.getElementById('newTaskInline');
+    container.style.display = 'none';
     document.getElementById('newTaskText').value = '';
-    if (btn) btn.disabled = false;
+    await restartSession(newText);
 }
 
 async function restartSession(newText = null) {
@@ -1042,7 +1117,15 @@ async function revealCards() {
     }
 }
 
-function leaveSession() {
+async function leaveSession() {
+    const confirmed = await confirmDialog.show(
+        'Вы действительно хотите выйти из комнаты? Все несохранённые голоса будут потеряны.',
+        'ВЫХОД ИЗ КОМНАТЫ',
+        'ВЫЙТИ',
+        'ОСТАТЬСЯ'
+    );
+    if (!confirmed) return;
+
     if (state.ws) state.ws.close();
     state.sessionId = null; 
     state.isInitiator = false; 
