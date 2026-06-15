@@ -2177,6 +2177,60 @@ document.addEventListener('DOMContentLoaded', () => {
             resultValue.dataset.lastValid = String(rounded);
         });
     }
+    
+    // Горячие клавиши
+    document.addEventListener('keydown', (e) => {
+        // Не срабатываем если фокус на поле ввода
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+        
+        const key = e.key;
+        
+        // 1-9 — голосование
+        if (/^[1-9]$/.test(key)) {
+            const pointBtn = document.querySelector(`.point-btn[data-point="${key}"]`);
+            if (pointBtn) {
+                pointBtn.click();
+                e.preventDefault();
+            }
+            return;
+        }
+        
+        // R — рестарт
+        if (key === 'r' || key === 'R') {
+            if (state.isInitiator) {
+                restartSession();
+                e.preventDefault();
+            }
+            return;
+        }
+        
+        // O — открыть карты
+        if (key === 'o' || key === 'O') {
+            if (state.isInitiator && state.sessionId) {
+                revealCards();
+                e.preventDefault();
+            }
+            return;
+        }
+        
+        // N — новая задача
+        if (key === 'n' || key === 'N') {
+            if (state.isInitiator) {
+                toggleNewTaskInput();
+                e.preventDefault();
+            }
+            return;
+        }
+        
+        // J — отправить в Jira
+        if (key === 'j' || key === 'J') {
+            if (state.isInitiator && document.getElementById('jiraSendBtn').style.display !== 'none') {
+                jiraSendEstimate();
+                e.preventDefault();
+            }
+            return;
+        }
+    });
 });
 
 async function joinOrCreateSession() {
@@ -2486,6 +2540,8 @@ function updateSessionDisplay(session) {
     const votingSection = document.getElementById('votingSection');
     votingSection.style.opacity = session.revealed ? '0.4' : '1';
     votingSection.style.pointerEvents = session.revealed ? 'none' : 'auto';
+    
+    checkAutoReveal(session);
 }
 
 function renderParticipants(session) {
@@ -2725,6 +2781,30 @@ async function restartSession(newText = null) {
         toast.error(error.message, 'НЕТ СВЯЗИ');
     } finally {
         if (btn) btn.disabled = false;
+    }
+}
+
+// ==================== AUTO-REVEAL ====================
+let autoRevealTimer = null;
+
+function checkAutoReveal(session) {
+    if (session.revealed || !state.isInitiator) return;
+    
+    const totalOnline = session.participants ? session.participants.filter(p => p.online).length : 0;
+    if (totalOnline <= 1) return; // только инициатор — не открываем
+    
+    if (session.vote_count >= totalOnline) {
+        if (autoRevealTimer) return; // уже запущен таймер
+        autoRevealTimer = setTimeout(() => {
+            autoRevealTimer = null;
+            revealCards();
+            toast.info('Все проголосовали — карты открыты', 'AUTO');
+        }, 1000);
+    } else {
+        if (autoRevealTimer) {
+            clearTimeout(autoRevealTimer);
+            autoRevealTimer = null;
+        }
     }
 }
 
