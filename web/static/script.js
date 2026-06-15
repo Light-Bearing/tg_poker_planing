@@ -105,7 +105,7 @@ function closeConfirmModal(result) {
 
 // ==================== JOIN SCREEN HELPERS ====================
 let SERVER_SCALE_NAMES = {};       // populated from server: {custom: "Custom", fibonacci: "Fibonacci", ...}
-let CURRENT_SCALE_NAME = "custom";  // current scale for this session
+let CURRENT_SCALE_NAME = localStorage.getItem('pp_last_scale') || "custom";  // current scale for this session
 const SPECIAL_POINTS = ["❔", "☕"];
 const MAX_RECENT_ROOMS = 5;
 
@@ -231,12 +231,19 @@ function renderJoinScaleSelector() {
     if (!container || !buttonsContainer) return;
 
     const scaleNames = Object.keys(SERVER_SCALE_NAMES).length > 0 ? SERVER_SCALE_NAMES : { custom: 'Custom' };
-    const entries = Object.entries(scaleNames);
+    let entries = Object.entries(scaleNames);
 
     if (entries.length <= 1) {
         container.style.display = 'none';
         return;
     }
+
+    // Сортируем: custom — в конец
+    entries.sort((a, b) => {
+        if (a[0] === 'custom') return 1;
+        if (b[0] === 'custom') return -1;
+        return 0;
+    });
 
     container.style.display = 'flex';
     let html = '';
@@ -252,6 +259,7 @@ function renderJoinScaleSelector() {
 
 function onJoinScaleClick(scaleName) {
     CURRENT_SCALE_NAME = scaleName;
+    localStorage.setItem('pp_last_scale', scaleName);
     renderJoinScaleSelector();
     renderScalePoints(scaleName);
 }
