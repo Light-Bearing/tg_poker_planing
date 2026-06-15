@@ -784,6 +784,7 @@ body::before {
     grid-template-columns: repeat(10, 1fr);
     gap: 4px;
     margin-bottom: 10px;
+    min-height: 34px;
 }
 
 .scale-point {
@@ -1012,6 +1013,22 @@ body::before {
 /* ========== FORMS ========== */
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; margin-bottom: 6px; font-weight: 600; color: var(--text-secondary); font-size: 0.75em; text-transform: uppercase; letter-spacing: 2px; }
+
+#taskGroup {
+    overflow: hidden;
+    max-height: 200px;
+    opacity: 1;
+    transition: max-height 0.25s ease, opacity 0.2s ease, margin-bottom 0.25s ease;
+    margin-bottom: 0;
+}
+
+#taskGroup.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin-bottom: 0;
+    pointer-events: none;
+}
+
 .form-group input, .form-group textarea {
     width: 100%; padding: 10px 14px; background: var(--bg-input); border: 1px solid var(--border);
     border-radius: 2px; font-size: 14px; color: var(--text-primary); font-family: var(--font-main); transition: border-color 0.2s, box-shadow 0.2s;
@@ -1371,11 +1388,6 @@ body::before {
     top: 8px;
     outline: 2px solid var(--accent-hover);
     outline-offset: 2px;
-}
-
-/* ========== ANTI-JITTER FIX ========== */
-#joinScreen * {
-    transform: none !important;
 }
 
 /* ========== HISTOGRAM ========== */

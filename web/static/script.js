@@ -568,7 +568,7 @@ function updateSoundButton() {
 function toggleTaskField() {
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskGroup = document.getElementById('taskGroup');
-    taskGroup.style.display = sessionId ? 'none' : 'block';
+    taskGroup.classList.toggle('collapsed', !!sessionId);
     updateJoinButtonText();
 }
 
@@ -612,14 +612,15 @@ document.addEventListener('DOMContentLoaded', () => {
     soundManager.setEnabled(state.soundEnabled);
     
     document.getElementById('username').value = state.username;
-    updateJoinButtonText();
     
     const urlParams = new URLSearchParams(window.location.search);
     const sessionId = urlParams.get('session');
     if (sessionId) {
         document.getElementById('sessionId').value = sessionId;
-        document.getElementById('taskGroup').style.display = 'none';
+        document.getElementById('taskGroup').classList.add('collapsed');
     }
+    
+    updateJoinButtonText();
     
     if (state.username && sessionId) joinOrCreateSession();
     
@@ -833,11 +834,12 @@ function updateSessionDisplay(session) {
     const resultCard = document.getElementById('resultCard');
     
     if (session.revealed && session.average > 0) {
+        const ceilAverage = Math.ceil(session.average);
         averageCard.style.display = 'block';
-        document.getElementById('averageValue').textContent = session.average.toFixed(1);
+        document.getElementById('averageValue').textContent = ceilAverage;
         resultCard.style.display = 'block';
         resultCard.style.cursor = 'pointer';
-        document.getElementById('resultValue').textContent = session.average.toFixed(1);
+        document.getElementById('resultValue').textContent = ceilAverage;
         document.getElementById('resultLabel').textContent = 'НАЖМИТЕ, ЧТОБЫ СКОПИРОВАТЬ';
         renderHistogram(session);
     } else {
@@ -1126,8 +1128,8 @@ async function leaveSession() {
     );
     if (!confirmed) return;
 
+    state.sessionId = null; // очищаем ДО закрытия сокета, чтобы onclose не переподключался
     if (state.ws) state.ws.close();
-    state.sessionId = null; 
     state.isInitiator = false; 
     state.selectedPoint = null; 
     state.wasRevealed = false;
