@@ -105,5 +105,5 @@ async def main():
         print("👋 Server stopped")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     asyncio.run(main())

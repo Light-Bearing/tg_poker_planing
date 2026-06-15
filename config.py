@@ -5,7 +5,7 @@ try:
     from dotenv import load_dotenv
 
     load_dotenv()
-except ImportError:
+except ImportError:  # pragma: no cover
     pass
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("PP_BOT_TOKEN")
