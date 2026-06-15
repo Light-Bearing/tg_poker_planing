@@ -90,10 +90,17 @@
             <div class="join-grid-bottom">
                 <div class="scale-preview">
                     <div class="scale-title">ШКАЛА ОЦЕНОК</div>
+                    <div class="scale-selector join-scale-selector" id="joinScaleSelector">
+                        <span class="scale-selector-label">📐 Шкала</span>
+                        <div class="scale-selector-buttons" id="joinScaleSelectorButtons"></div>
+                    </div>
                     <div class="scale-points" id="scalePoints"></div>
                     <div class="scale-legend">
                         <span><strong>❔</strong> Не уверен</span>
                         <span><strong>☕</strong> Нужен перерыв</span>
+                        <span id="editCustomScaleWrap" style="display:none; margin-left: auto;">
+                            <button class="scale-edit-btn" onclick="openCustomScaleEditor()" title="Редактировать пользовательскую шкалу">✏️ ПРАВИТЬ</button>
+                        </span>
                     </div>
                 </div>
 
@@ -217,6 +224,29 @@
     <!-- TOAST КОНТЕЙНЕР -->
     <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
     
+    <!-- МОДАЛКА РЕДАКТОРА ШКАЛЫ -->
+    <div id="scaleEditorModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="scaleEditorTitle" tabindex="-1">
+        <div class="confirm-backdrop" onclick="closeCustomScaleEditor()"></div>
+        <div class="confirm-dialog scale-editor-dialog">
+            <div class="confirm-header">
+                <span class="confirm-icon">📐</span>
+                <span class="confirm-title" id="scaleEditorTitle">ПОЛЬЗОВАТЕЛЬСКАЯ ШКАЛА</span>
+            </div>
+            <div class="scale-editor-body">
+                <p class="scale-editor-hint">Добавьте значения для оценки. Минимум 2 значения. Оставшиеся ❔ и ☕ добавляются автоматически.</p>
+                <div class="scale-editor-list" id="scaleEditorList"></div>
+                <div class="scale-editor-add">
+                    <input type="text" id="scaleEditorNewPoint" placeholder="Новое значение" class="scale-editor-input">
+                    <button class="btn btn-primary scale-editor-add-btn" onclick="addCustomPoint()">+</button>
+                </div>
+            </div>
+            <div class="confirm-actions">
+                <button class="btn btn-outline" onclick="closeCustomScaleEditor()">ОТМЕНА</button>
+                <button class="btn btn-primary" onclick="saveCustomScale()">СОХРАНИТЬ</button>
+            </div>
+        </div>
+    </div>
+
     <!-- МОДАЛКА ПОДТВЕРЖДЕНИЯ -->
     <div id="confirmModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" tabindex="-1">
         <div class="confirm-backdrop" onclick="closeConfirmModal(false)"></div>
@@ -233,6 +263,13 @@
         </div>
     </div>
     
+    <script>
+        // Server-injected scale data
+        const SERVER_AVAILABLE_POINTS = {{ available_points | tojson | safe }};
+        const SERVER_SCALE_NAMES_JSON = {{ scale_names | tojson | safe }};
+        const SERVER_SCALES = {{ scales | tojson | safe }};
+        const SERVER_DEFAULT_CUSTOM_POINTS = {{ scales.get('custom', []) | tojson | safe }};
+    </script>
     <script src="/static/script.js"></script>
 </body>
 </html>

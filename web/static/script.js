@@ -104,10 +104,8 @@ function closeConfirmModal(result) {
 }
 
 // ==================== JOIN SCREEN HELPERS ====================
-const AVAILABLE_POINTS_DISPLAY = [
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", 
-    "11", "12", "14", "16", "18", "20", "28", "40", "❔", "☕"
-];
+let SERVER_SCALE_NAMES = {};       // populated from server: {custom: "Custom", fibonacci: "Fibonacci", ...}
+let CURRENT_SCALE_NAME = "custom";  // current scale for this session
 const SPECIAL_POINTS = ["❔", "☕"];
 const MAX_RECENT_ROOMS = 5;
 
@@ -210,14 +208,161 @@ function joinRecentRoom(sessionId) {
     }
 }
 
-function renderScalePoints() {
+function renderScalePoints(scaleName) {
     const container = document.getElementById('scalePoints');
     if (!container) return;
-    container.innerHTML = AVAILABLE_POINTS_DISPLAY.map(point => {
+    // Use SERVER_SCALES if available, else fallback
+    const scales = typeof SERVER_SCALES !== 'undefined' ? SERVER_SCALES : null;
+    let points;
+    if (scales && scaleName && scales[scaleName]) {
+        points = scales[scaleName];
+    } else {
+        points = (typeof SERVER_AVAILABLE_POINTS !== 'undefined' ? SERVER_AVAILABLE_POINTS : ["1","2","3","5","8","13","21","❔","☕"]);
+    }
+    container.innerHTML = points.map(point => {
         const isSpecial = SPECIAL_POINTS.includes(point);
         return `<div class="scale-point ${isSpecial ? 'special' : ''}">${point}</div>`;
     }).join('');
 }
+
+function renderJoinScaleSelector() {
+    const container = document.getElementById('joinScaleSelector');
+    const buttonsContainer = document.getElementById('joinScaleSelectorButtons');
+    if (!container || !buttonsContainer) return;
+
+    const scaleNames = Object.keys(SERVER_SCALE_NAMES).length > 0 ? SERVER_SCALE_NAMES : { custom: 'Custom' };
+    const entries = Object.entries(scaleNames);
+
+    if (entries.length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    buttonsContainer.innerHTML = entries.map(([key, label]) => {
+        const active = key === CURRENT_SCALE_NAME ? 'active' : '';
+        return `<button class="scale-btn ${active}" data-scale="${key}" onclick="onJoinScaleClick('${key}')">${label}</button>`;
+    }).join('');
+}
+
+function onJoinScaleClick(scaleName) {
+    CURRENT_SCALE_NAME = scaleName;
+    renderJoinScaleSelector();
+    renderScalePoints(scaleName);
+    updateEditScaleButton(scaleName);
+}
+
+function updateEditScaleButton(scaleName) {
+    const wrap = document.getElementById('editCustomScaleWrap');
+    if (wrap) {
+        wrap.style.display = scaleName === 'custom' ? 'inline-block' : 'none';
+    }
+}
+
+// ==================== CUSTOM SCALE EDITOR ====================
+let customScaleBuffer = [];
+
+function openCustomScaleEditor() {
+    const modal = document.getElementById('scaleEditorModal');
+    if (!modal) return;
+
+    // Load current custom points: first try from saved, then fall back to SERVER_SCALES.custom
+    customScaleBuffer = [...(getCurrentCustomPoints())];
+    renderCustomScaleEditorList();
+    modal.classList.remove('hidden');
+    document.getElementById('scaleEditorNewPoint').focus();
+}
+
+function closeCustomScaleEditor() {
+    document.getElementById('scaleEditorModal').classList.add('hidden');
+}
+
+function getCurrentCustomPoints() {
+    if (typeof SERVER_SCALES !== 'undefined' && SERVER_SCALES && SERVER_SCALES.custom) {
+        // Filter out special points
+        return SERVER_SCALES.custom.filter(p => !SPECIAL_POINTS.includes(p));
+    }
+    return ['1', '2', '3', '5', '8', '13', '21'];
+}
+
+function renderCustomScaleEditorList() {
+    const list = document.getElementById('scaleEditorList');
+    if (!list) return;
+    if (customScaleBuffer.length === 0) {
+        list.innerHTML = '<div class="scale-editor-empty">Нет значений. Добавьте хотя бы 2.</div>';
+        return;
+    }
+    list.innerHTML = customScaleBuffer.map((point, idx) => `
+        <div class="scale-editor-item">
+            <span class="scale-editor-item-value">${escapeHtml(point)}</span>
+            <button class="scale-editor-item-remove" onclick="removeCustomPoint(${idx})" title="Удалить ${escapeHtml(point)}">✕</button>
+        </div>
+    `).join('');
+}
+
+function addCustomPoint() {
+    const input = document.getElementById('scaleEditorNewPoint');
+    const value = input.value.trim();
+    if (!value) return;
+    if (SPECIAL_POINTS.includes(value)) {
+        toast.warning('❔ и ☕ добавляются автоматически');
+        return;
+    }
+    if (customScaleBuffer.includes(value)) {
+        toast.warning('Такое значение уже есть');
+        return;
+    }
+    customScaleBuffer.push(value);
+    renderCustomScaleEditorList();
+    input.value = '';
+    input.focus();
+}
+
+function removeCustomPoint(idx) {
+    customScaleBuffer.splice(idx, 1);
+    renderCustomScaleEditorList();
+}
+
+async function saveCustomScale() {
+    if (customScaleBuffer.length < 2) {
+        toast.warning('Добавьте хотя бы 2 значения');
+        return;
+    }
+
+    const points = [...customScaleBuffer, ...SPECIAL_POINTS];
+    const username = document.getElementById('username').value.trim() || state.username;
+    if (!username) {
+        toast.warning('Введите идентификатор');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/custom-scale', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username, points })
+        });
+        if (!response.ok) {
+            const err = await response.json();
+            toast.error(err.error || 'Ошибка сохранения');
+            return;
+        }
+
+        const data = await response.json();
+        // Update SERVER_SCALES.custom in memory
+        if (typeof SERVER_SCALES !== 'undefined') {
+            SERVER_SCALES.custom = data.points;
+        }
+        // Refresh the preview
+        renderScalePoints('custom');
+        closeCustomScaleEditor();
+        toast.success('Пользовательская шкала сохранена');
+    } catch (error) {
+        toast.error(error.message, 'НЕТ СВЯЗИ');
+    }
+}
+
+
 
 // ==================== SOUND MANAGER ====================
 class SoundManager {
@@ -438,9 +583,16 @@ function formatTaskText(text) {
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     updateSoundButton();
+
+    // Инициализируем названия шкал из серверных данных
+    if (typeof SERVER_SCALE_NAMES_JSON !== 'undefined') {
+        SERVER_SCALE_NAMES = SERVER_SCALE_NAMES_JSON;
+    }
     
-    // Рендерим превью шкалы и последние комнаты
-    renderScalePoints();
+    // Рендерим превью шкалы, селектор шкалы и последние комнаты
+    renderJoinScaleSelector();
+    renderScalePoints(CURRENT_SCALE_NAME);
+    updateEditScaleButton(CURRENT_SCALE_NAME);
     renderRecentRooms();
     
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
@@ -464,10 +616,14 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (state.username && sessionId) joinOrCreateSession();
     
-    // Escape closes modal
+    // Escape closes modals
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !document.getElementById('confirmModal').classList.contains('hidden')) {
-            closeConfirmModal(false);
+        if (e.key === 'Escape') {
+            if (!document.getElementById('confirmModal').classList.contains('hidden')) {
+                closeConfirmModal(false);
+            } else if (!document.getElementById('scaleEditorModal').classList.contains('hidden')) {
+                closeCustomScaleEditor();
+            }
         }
     });
 });
@@ -476,6 +632,7 @@ async function joinOrCreateSession() {
     const username = document.getElementById('username').value.trim();
     const sessionId = document.getElementById('sessionId').value.trim();
     const taskText = document.getElementById('taskText').value.trim();
+    const scaleName = CURRENT_SCALE_NAME || 'custom';
     
     if (!username) { 
         toast.warning('Введите идентификатор пользователя');
@@ -497,6 +654,20 @@ async function joinOrCreateSession() {
             const response = await fetch(`/api/sessions/${sessionId}`);
             if (!response.ok) throw new Error('Комната не найдена');
             const data = await response.json();
+            
+            // If the selected scale differs from the room's current scale, update it
+            if (scaleName !== (data.scale_name || 'custom')) {
+                const scaleResp = await fetch(`/api/sessions/${sessionId}/scale`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ scale_name: scaleName })
+                });
+                if (scaleResp.ok) {
+                    const updatedData = await scaleResp.json();
+                    Object.assign(data, updatedData);
+                }
+            }
+            
             // ✅ Определяем, являемся ли мы инициатором из данных сервера
             const isMeInitiator = data.initiator_id === `web_${username}`;
             enterSession(sessionId, data, isMeInitiator);
@@ -513,7 +684,7 @@ async function joinOrCreateSession() {
             const response = await fetch('/api/sessions', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ username, text: taskText })
+                body: JSON.stringify({ username, text: taskText, scale_name: scaleName })
             });
             if (!response.ok) throw new Error('Ошибка создания комнаты');
             const data = await response.json();
@@ -600,6 +771,12 @@ function updateConnectionStatus(status) {
     const el = document.getElementById('connectionStatus');
     el.className = 'connection-status ' + status;
     el.textContent = { 'connected': 'ONLINE', 'disconnected': 'OFFLINE', 'connecting': 'CONNECTING' }[status] || status;
+}
+
+function setScale(scaleName) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'set_scale', scale_name: scaleName }));
+    }
 }
 
 function updateSessionDisplay(session) {

@@ -10,10 +10,13 @@ from connection import manager
 from ppbot.game import GameRegistry
 from web_api import (
     api_create_session,
+    api_get_custom_scale,
     api_get_session,
     api_list_sessions,
     api_restart,
     api_reveal,
+    api_save_custom_scale,
+    api_set_scale,
     api_vote,
     health,
     info,
@@ -55,6 +58,9 @@ def client():
         Route("/api/sessions/{session_id}/vote", api_vote, methods=["POST"]),
         Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"]),
         Route("/api/sessions/{session_id}/reveal", api_reveal, methods=["POST"]),
+        Route("/api/sessions/{session_id}/scale", api_set_scale, methods=["POST"]),
+        Route("/api/custom-scale", api_get_custom_scale, methods=["GET"]),
+        Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
         Route("/info", info, methods=["GET"]),
         WebSocketRoute("/ws/{session_id}", websocket_endpoint),
@@ -215,3 +221,117 @@ class TestRestart:
     def test_restart_session_not_found(self, client):
         resp = client.post("/api/sessions/nonexistent/restart", json={"username": "Alice"})
         assert resp.status_code == 404
+
+
+class TestScale:
+    def test_create_session_with_scale(self, client):
+        resp = client.post("/api/sessions", json={"username": "Alice", "text": "My task", "scale_name": "fibonacci"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scale_name"] == "fibonacci"
+        assert "8" in data["available_points"]
+        assert "4" not in data["available_points"]
+
+    def test_create_session_default_scale(self, client):
+        resp = client.post("/api/sessions", json={"username": "Alice", "text": "My task"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scale_name"] == "custom"
+
+    def test_set_scale(self, client):
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+        assert create["scale_name"] == "custom"
+
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"scale_name": "tshirt"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scale_name"] == "tshirt"
+        assert "XXL" in data["available_points"]
+
+    def test_set_scale_missing_name(self, client):
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={})
+        assert resp.status_code == 400
+
+    def test_set_scale_session_not_found(self, client):
+        resp = client.post("/api/sessions/nonexistent/scale", json={"scale_name": "fibonacci"})
+        assert resp.status_code == 404
+
+    def test_set_scale_invalid_falls_back_to_default(self, client):
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"scale_name": "bogus"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scale_name"] == "custom"
+
+
+class TestCustomScale:
+    def test_get_custom_scale_empty(self, client):
+        resp = client.get("/api/custom-scale", params={"username": "Alice"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["points"] == []
+
+    def test_get_custom_scale_missing_username(self, client):
+        resp = client.get("/api/custom-scale")
+        assert resp.status_code == 400
+
+    def test_save_custom_scale(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": ["10", "20", "30", "50", "100"]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["points"] == ["10", "20", "30", "50", "100"]
+
+        # Verify it's saved
+        get_resp = client.get("/api/custom-scale", params={"username": "Alice"})
+        assert get_resp.json()["points"] == ["10", "20", "30", "50", "100"]
+
+    def test_save_custom_scale_missing_username(self, client):
+        resp = client.post("/api/custom-scale", json={"points": ["1", "2"]})
+        assert resp.status_code == 400
+
+    def test_save_custom_scale_invalid_points(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": "not a list"},
+        )
+        assert resp.status_code == 400
+
+    def test_save_custom_scale_too_few_points(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": ["1"]},
+        )
+        assert resp.status_code == 400
+
+    def test_create_session_with_custom_scale_uses_saved_points(self, client):
+        # Save custom scale first
+        client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": ["10", "20", "30", "❔", "☕"]},
+        )
+
+        # Create session with custom scale
+        resp = client.post(
+            "/api/sessions",
+            json={"username": "Alice", "text": "My task", "scale_name": "custom"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["scale_name"] == "custom"
+        # Should include saved custom points
+        assert "10" in data["available_points"]
+        assert "20" in data["available_points"]
+        assert "30" in data["available_points"]
+        # The default AVAILABLE_POINTS also includes "4", "6", etc.
+        # But custom points should override the defaults
+        assert data["available_points"] == ["10", "20", "30", "❔", "☕"]

@@ -601,7 +601,7 @@ body::before {
 
 /* ========== JOIN SCREEN ========== */
 #joinScreen {
-    max-width: 960px;
+    max-width: 1100px;
     margin: 20px auto;
     padding: 28px 32px;
     max-height: calc(100vh - 80px);
@@ -728,7 +728,7 @@ body::before {
 
 .join-grid-bottom {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1.4fr 1fr;
     gap: 20px;
     overflow: hidden;
 }
@@ -920,6 +920,65 @@ body::before {
     font-style: italic;
     letter-spacing: 0.5px;
 }
+
+/* ========== SCALE SELECTOR (join screen) ========== */
+.scale-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+}
+
+.join-scale-selector {
+    margin-bottom: 12px;
+}
+
+.scale-selector-buttons {
+    display: flex;
+    gap: 4px;
+    flex-wrap: nowrap;
+}
+
+.scale-btn {
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-body);
+    color: var(--text-primary);
+    border-radius: 2px;
+    font-size: 0.7em;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.scale-btn:hover {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.scale-btn.active {
+    background: var(--accent);
+    color: var(--bg-body);
+    border-color: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.scale-selector-label {
+    font-size: 0.78em;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+
 
 /* ========== FORMS ========== */
 .form-group { margin-bottom: 16px; }
@@ -1125,6 +1184,136 @@ body::before {
 }
 
 .confirm-actions .btn { min-width: 110px; }
+
+/* ========== SCALE EDITOR MODAL ========== */
+.scale-editor-dialog {
+    max-width: 480px;
+}
+
+.scale-editor-body {
+    margin-bottom: 16px;
+}
+
+.scale-editor-hint {
+    color: var(--text-secondary);
+    font-size: 0.8em;
+    margin-bottom: 12px;
+    line-height: 1.4;
+}
+
+.scale-editor-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    min-height: 50px;
+    padding: 8px;
+    background: var(--bg-body);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    align-content: flex-start;
+}
+
+.scale-editor-empty {
+    width: 100%;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.8em;
+    padding: 10px;
+    font-style: italic;
+}
+
+.scale-editor-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 4px 8px;
+    transition: border-color 0.2s;
+}
+
+.scale-editor-item:hover {
+    border-color: var(--accent);
+}
+
+.scale-editor-item-value {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.scale-editor-item-remove {
+    background: transparent;
+    border: none;
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 0.75em;
+    padding: 1px 4px;
+    border-radius: 2px;
+    transition: all 0.2s;
+    line-height: 1;
+    opacity: 0.6;
+}
+
+.scale-editor-item-remove:hover {
+    opacity: 1;
+    background: rgba(239, 71, 111, 0.15);
+}
+
+.scale-editor-add {
+    display: flex;
+    gap: 6px;
+}
+
+.scale-editor-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-size: 14px;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    transition: border-color 0.2s;
+}
+
+.scale-editor-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.scale-editor-add-btn {
+    padding: 8px 14px !important;
+    font-size: 1.1em !important;
+    min-width: auto !important;
+}
+
+/* ========== SCALE EDIT BUTTON ========== */
+.scale-edit-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-size: 0.75em;
+    font-family: var(--font-header);
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.scale-edit-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+}
 
 /* ========== LOADING STATE ========== */
 .btn.loading {
