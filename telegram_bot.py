@@ -70,6 +70,11 @@ async def handle_scale_click(query, data, chat_id):
     if not game:
         return await query.answer("Game not found", show_alert=True)
 
+    # Только инициатор может менять шкалу
+    initiator_id = game.initiator.get("id")
+    if str(query.from_user.id) != str(initiator_id):
+        return await query.answer("Only initiator can change scale", show_alert=True)
+
     # Advance to the next scale in the list
     scale_keys = list(SCALES.keys())
     current_idx = scale_keys.index(game.scale_name) if game.scale_name in scale_keys else -1

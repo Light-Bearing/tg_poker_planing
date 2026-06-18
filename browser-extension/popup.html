@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PP Jira Bridge</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      width: 400px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      background: #f5f5f5;
+    }
+    h1 {
+      font-size: 16px;
+      margin-bottom: 12px;
+      color: #333;
+    }
+    .section {
+      background: white;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .section-title {
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #555;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      color: #444;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #0052CC;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .btn-primary {
+      background: #0052CC;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #0065ff;
+    }
+    .btn-secondary {
+      background: #eaeaea;
+      color: #333;
+    }
+    .btn-secondary:hover {
+      background: #d4d4d4;
+    }
+    .status {
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .status.success {
+      background: #e3fcef;
+      color: #006644;
+    }
+    .status.error {
+      background: #ffebe6;
+      color: #bf2600;
+    }
+    .browser-note {
+      font-size: 11px;
+      color: #666;
+      background: #fff3cd;
+      padding: 8px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      border-left: 3px solid #ffc107;
+    }
+    .browser-note strong {
+      color: #856404;
+    }
+    .help-text {
+      font-size: 11px;
+      color: #888;
+      margin-top: 4px;
+    }
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔗 PP Jira Bridge</h1>
+
+  <!-- Инфо о браузере -->
+  <div id="browserNote" class="browser-note hidden"></div>
+
+  <!-- Раздел подключения к Jira -->
+  <div class="section">
+    <div class="section-title">Подключение к Jira</div>
+    
+    <label for="jiraUrl">URL Jira</label>
+    <input type="text" id="jiraUrl" placeholder="https://your-company.atlassian.net">
+    
+    <label for="jiraToken">API Token</label>
+    <input type="password" id="jiraToken" placeholder="Ваш API token">
+    <div class="help-text">
+      Создайте token на: <a href="https://id.atlassian.com/manage/api-tokens" target="_blank">id.atlassian.com/manage/api-tokens</a>
+    </div>
+    
+    <label for="jiraFilter">Jira Filter (опционально)</label>
+    <input type="text" id="jiraFilter" placeholder="project = MYPROJ AND status = 'In Progress'">
+    
+    <button id="testConnection" class="btn-secondary">Проверить подключение</button>
+    <div id="connectionStatus" class="status hidden"></div>
+  </div>
+
+  <!-- Раздел полей -->
+  <div class="section">
+    <div class="section-title">Настройка полей</div>
+    
+    <label for="storyPointsField">ID поля Story Points</label>
+    <input type="text" id="storyPointsField" placeholder="customfield_10016">
+    <div class="help-text">Нажмите "Загрузить поля" чтобы получить список</div>
+    
+    <label for="epicLinkField">ID поля Epic Link (опционально)</label>
+    <input type="text" id="epicLinkField" placeholder="customfield_10014">
+    
+    <button id="loadFields" class="btn-secondary">Загрузить список полей</button>
+    <div id="fieldsList" class="hidden" style="margin-top: 8px; max-height: 150px; overflow-y: auto; background: #f9f9f9; padding: 8px; border-radius: 4px;"></div>
+  </div>
+
+  <!-- Кнопки действий -->
+  <button id="saveSettings" class="btn-primary">Сохранить настройки</button>
+  <button id="clearSettings" class="btn-secondary">Очистить настройки</button>
+
+  <script src="browser-polyfill.min.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

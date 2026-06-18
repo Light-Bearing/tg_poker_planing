@@ -1,5 +1,3 @@
-import asyncio
-
 from starlette.websockets import WebSocket
 
 from ppbot.game import Game
@@ -24,19 +22,22 @@ class ConnectionManager:
                 self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
-        if username and session_id in self.session_users:
-            if username in self.session_users[session_id]:
-                del self.session_users[session_id][username]
-                asyncio.create_task(
-                    self.broadcast(
-                        session_id,
-                        {
-                            "type": "user_left",
-                            "username": username,
-                            "data": self._get_enriched_data(session_id, game),
-                        },
-                    )
-                )
+        # НЕ удаляем пользователя из session_users при disconnect
+        # Это позволяет сохранить состояние при временном разрыве (переключение вкладок)
+        # Пользователь будет удален только при явном уходе или таймауте
+        # if username and session_id in self.session_users:
+        #     if username in self.session_users[session_id]:
+        #         del self.session_users[session_id][username]
+        #         asyncio.create_task(
+        #             self.broadcast(
+        #                 session_id,
+        #                 {
+        #                     "type": "user_left",
+        #                     "username": username,
+        #                     "data": self._get_enriched_data(session_id, game),
+        #                 },
+        #             )
+        #         )
 
     async def broadcast(self, session_id: str, message: dict):
         if session_id in self.active_connections:

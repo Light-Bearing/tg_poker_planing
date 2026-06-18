@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Установка PP Jira Bridge — Chrome</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 700px;
+            width: 100%;
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #4285f4 0%, #34a853 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        .browser-badge {
+            display: inline-block;
+            background: white;
+            color: #4285f4;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-top: 12px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .step {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #4285f4;
+        }
+        .step-number {
+            background: #4285f4;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .step-content h3 {
+            font-size: 16px;
+            margin-bottom: 6px;
+            color: #333;
+        }
+        .step-content p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+        }
+        .step-content code {
+            background: #e8eaed;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #d93025;
+        }
+        .download-section {
+            text-align: center;
+            padding: 24px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+        .download-btn {
+            display: inline-block;
+            background: linear-gradient(135deg, #4285f4 0%, #34a853 100%);
+            color: white;
+            padding: 16px 32px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+            margin: 12px 0;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(66,133,244,0.4);
+        }
+        .download-btn.secondary {
+            background: #5f6368;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 24px;
+        }
+        .warning-title {
+            color: #856404;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .warning p {
+            color: #856404;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+        .footer a {
+            color: #4285f4;
+            text-decoration: none;
+        }
+        .icon {
+            font-size: 24px;
+            margin-right: 8px;
+        }
+        .screenshot {
+            text-align: center;
+            margin: 20px 0;
+            padding: 16px;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        .screenshot-text {
+            color: #666;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧩 Установка PP Jira Bridge</h1>
+            <p>Расширение для интеграции Planning Poker с Jira</p>
+            <div class="browser-badge">🌐 Google Chrome</div>
+        </div>
+
+        <div class="content">
+            <div class="download-section">
+                <h2 style="margin-bottom: 16px;">Шаг 1: Скачайте расширение</h2>
+                <a href="/extension/download?download=true" class="download-btn">
+                    📦 Скачать ZIP-архив
+                </a>
+                <br>
+                <a href="/" class="download-btn secondary">
+                    ← Вернуться на Planning Poker
+                </a>
+            </div>
+
+            <div class="warning">
+                <div class="warning-title">⚠️ Важно!</div>
+                <p>Это расширение разработано для внутреннего использования. При установке Chrome покажет предупреждение — нажмите "Загрузить" для подтверждения.</p>
+            </div>
+
+            <h2 style="margin-bottom: 20px;">Шаг 2: Установите расширение</h2>
+            
+            <div class="step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h3>Откройте страницу расширений</h3>
+                    <p>Вставьте в адресную строку: <code>chrome://extensions/</code></p>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h3>Включите режим разработчика</h3>
+                    <p>В правом верхнем углу включите переключатель <strong>"Режим разработчика"</strong></p>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h3>Загрузите распакованное расширение</h3>
+                    <p>Нажмите кнопку <strong>"Загрузить распакованное"</strong></p>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h3>Выберите папку</h3>
+                    <p>Распакуйте скачанный ZIP-архив и выберите полученную папку</p>
+                </div>
+            </div>
+
+            <div class="step">
+                <div class="step-number">5</div>
+                <div class="step-content">
+                    <h3>Обновите Planning Poker</h3>
+                    <p>Вернитесь на страницу Planning Poker и обновите её (<code>F5</code>)</p>
+                </div>
+            </div>
+
+            <div class="screenshot">
+                <div class="screenshot-text">
+                    📸 Иконка расширения появится в правом верхнем углу браузера<br>
+                    (возле адресной строки)
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 24px;">
+                <h3 style="margin-bottom: 16px;">Готово! 🎉</h3>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Теперь вы можете настроить подключение к Jira через иконку расширения
+                </p>
+                <a href="/" class="download-btn">
+                    Перейти к Planning Poker →
+                </a>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Нужна помощь? <a href="https://github.com/your-repo/issues" target="_blank">Создайте issue</a></p>
+        </div>
+    </div>
+
+    <script>
+        // Автоматически скачиваем архив через 2 секунды
+        setTimeout(() => {
+            const link = document.createElement('a');
+            link.href = '/extension/download?download=true';
+            link.download = 'pp-jira-bridge.zip';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }, 2000);
+    </script>
+</body>
+</html>

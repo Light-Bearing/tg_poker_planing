@@ -77,7 +77,7 @@ class Game:
     OP_REVEAL = "reveal"
     OP_REVEAL_NEW = "reveal-new"
 
-    def __init__(self, chat_id, vote_id, initiator, text, scale_name=None, custom_points=None):
+    def __init__(self, chat_id, vote_id, initiator, text, scale_name=None, custom_points=None, auto_reveal=False):
         self.chat_id = chat_id
         self.vote_id = vote_id
         self.initiator = initiator
@@ -87,6 +87,7 @@ class Game:
         self.revealed = False
         self.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
         self.custom_points = custom_points or []
+        self.auto_reveal = auto_reveal  # Автооткрытие при полном наборе голосов
 
     def add_vote(self, initiator, point):
         user_id = initiator.get("id") or initiator.get("user_id")

@@ -35,6 +35,7 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
         "available_points": game.get_points(),
         "scale_name": game.scale_name,
         "scale_names": SCALE_NAMES,
+        "auto_reveal": getattr(game, "auto_reveal", False),
     }
 
 
@@ -91,6 +92,7 @@ async def api_create_session(request: Request):
         session_id = str(uuid.uuid4())[:8]
         initiator = {"id": f"web_{username}", "first_name": username, "username": username}
         scale_name = data.get("scale_name", "").strip() or None
+        auto_reveal = data.get("auto_reveal", False)  # Новая настройка
 
         # Load initiator's saved custom scale if available
         custom_points = None
@@ -100,6 +102,7 @@ async def api_create_session(request: Request):
         game = state.storage.new_game(
             WEB_CHAT_ID, session_id, initiator, text, scale_name=scale_name, custom_points=custom_points
         )
+        game.auto_reveal = auto_reveal
         await state.storage.save_game(game)
 
         manager.register_user(session_id, username)
@@ -114,12 +117,19 @@ async def api_set_scale(request: Request):
     try:
         data = await request.json()
         scale_name = data.get("scale_name", "").strip()
+        username = data.get("username", "").strip()
         if not scale_name:
             return JSONResponse({"error": "scale_name is required"}, status_code=400)
+        if not username:
+            return JSONResponse({"error": "username is required"}, status_code=400)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
+
+        # Только инициатор может менять шкалу
+        if f"web_{username}" != game.initiator.get("id"):
+            return JSONResponse({"error": "Only initiator can change scale"}, status_code=403)
 
         game.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
         await state.storage.save_game(game)
@@ -127,6 +137,29 @@ async def api_set_scale(request: Request):
         return JSONResponse(enrich_session_response(game, session_id))
     except Exception as e:
         logger.error(f"Error setting scale: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def api_set_auto_reveal(request: Request):
+    """API для включения/выключения автооткрытия во время сессии"""
+    session_id = request.path_params["session_id"]
+    try:
+        data = await request.json()
+        auto_reveal = data.get("auto_reveal", False)
+
+        game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+        if not game:
+            return JSONResponse({"error": "Session not found"}, status_code=404)
+
+        game.auto_reveal = bool(auto_reveal)
+        await state.storage.save_game(game)
+
+        logger.info(f"Auto-reveal {'enabled' if auto_reveal else 'disabled'} for session {session_id}")
+
+        await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
+        return JSONResponse({"ok": True, "auto_reveal": auto_reveal})
+    except Exception as e:
+        logger.error(f"Error setting auto-reveal: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -263,8 +296,37 @@ async def info(_):
     )
 
 
-async def download_extension(_):
-    from starlette.responses import FileResponse
+async def download_extension(request: Request):
+    from starlette.responses import FileResponse, HTMLResponse
 
-    zip_path = "browser-extension/pp-jira-bridge.zip"
+    # Проверяем параметр ?download=html — показать страницу с инструкциями
+    download_param = request.query_params.get("download", "")
+
+    # Если ?download=html — показываем страницу с инструкциями для браузера
+    if download_param == "html":
+        from starlette.responses import HTMLResponse
+
+        user_agent = request.headers.get("user-agent", "").lower()
+
+        is_firefox = "firefox" in user_agent
+        is_edge = "edg" in user_agent
+
+        # Показываем страницу с инструкцией для конкретного браузера
+        if is_firefox:
+            instruction_file = "browser-extension/firefox-instruction.html"
+        elif is_edge:
+            instruction_file = "browser-extension/edge-instruction.html"
+        else:  # Chrome или другой Chromium
+            instruction_file = "browser-extension/chrome-instruction.html"
+
+        try:
+            with open(instruction_file, "r", encoding="utf-8") as f:
+                content = f.read()
+            return HTMLResponse(content)
+        except FileNotFoundError:
+            return HTMLResponse("<h1>Файл инструкции не найден</h1>")
+
+    # Если ?download=true или просто клик с атрибутом download — прямая загрузка ZIP
+    # Скачиваем универсальный архив со всеми файлами и инструкциями
+    zip_path = "browser-extension/pp-jira-bridge-all.zip"
     return FileResponse(zip_path, media_type="application/zip", filename="pp-jira-bridge.zip")
