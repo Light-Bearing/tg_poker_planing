@@ -181,7 +181,13 @@
                         <div style="display: flex; gap: 8px; flex-direction: column;">
                             <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
                             <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>
-                            <button class="btn btn-success" onclick="revealCards()">◈ ОТКРЫТЬ</button>
+                            <button class="btn btn-success" onclick="revealCards()" style="position:relative;">
+                                <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;background:rgba(255,255,255,0.3);padding:4px 8px;border-radius:4px;cursor:pointer;margin-right:8px;">
+                                    <input type="checkbox" id="autoRevealToggle" onchange="toggleAutoReveal()" style="width:auto;margin:0;" onclick="event.stopPropagation()">
+                                    <span>авто</span>
+                                </label>
+                                <span>◈ ОТКРЫТЬ</span>
+                            </button>
                         </div>
                     </div>
                     
@@ -240,20 +246,51 @@
             <div id="jiraNoExt" class="jira-no-ext">
                 <div class="jira-no-ext-icon">🧩</div>
                 <p>Для интеграции с Jira нужно расширение браузера.</p>
-                <a class="btn btn-primary" href="/extension/download" download style="width:100%;justify-content:center;">
-                    📦 СКАЧАТЬ РАСШИРЕНИЕ
-                </a>
-                <details class="jira-install-help">
-                    <summary>❓ КАК УСТАНОВИТЬ</summary>
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <a class="btn btn-primary" href="/extension/download?download=true" download style="flex:1;justify-content:center;">
+                        📦 СКАЧАТЬ РАСШИРЕНИЕ
+                    </a>
+                </div>
+                
+                <!-- Инструкция для Chrome -->
+                <div id="chromeInstallHelp" class="jira-install-help" style="display:none;">
+                    <strong>🌐 Google Chrome / Edge / Chromium:</strong>
+                    <ol>
+                        <li>Распакуйте скачанный ZIP-архив</li>
+                        <li>Откройте <code>chrome://extensions</code> (или <code>edge://extensions</code>)</li>
+                        <li>Включите <strong>Режим разработчика</strong> (в правом верхнем углу)</li>
+                        <li>Нажмите <strong>Загрузить распакованное расширение</strong></li>
+                        <li>Выберите папку <code>build-chrome</code> из архива</li>
+                        <li>Обновите страницу Planning Poker (<code>F5</code>)</li>
+                    </ol>
+                </div>
+                
+                <!-- Инструкция для Firefox -->
+                <div id="firefoxInstallHelp" class="jira-install-help" style="display:none;">
+                    <strong>🦊 Mozilla Firefox:</strong>
+                    <ol>
+                        <li>Распакуйте скачанный ZIP-архив</li>
+                        <li>Откройте <code>about:debugging#/runtime/this-firefox</code></li>
+                        <li>Нажмите <strong>Временная загрузка дополнения...</strong></li>
+                        <li>Выберите файл <code>manifest-firefox.json</code> из папки <code>build-firefox</code></li>
+                        <li>Обновите страницу Planning Poker (<code>F5</code>)</li>
+                    </ol>
+                    <div style="background:#e7f3ff;padding:8px;border-radius:4px;margin-top:8px;font-size:12px;color:#0d47a1;">
+                        ⚠️ Временное расширение работает до перезапуска Firefox. Для постоянной установки нужно подписать расширение через Mozilla Add-ons.
+                    </div>
+                </div>
+                
+                <!-- Инструкция для других браузеров -->
+                <div id="otherInstallHelp" class="jira-install-help" style="display:none;">
+                    <strong>📖 Как установить:</strong>
                     <ol>
                         <li>Распакуйте ZIP в отдельную папку</li>
-                        <li>Откройте <code>chrome://extensions</code></li>
-                        <li>Включите <strong>Режим разработчика</strong></li>
-                        <li>Нажмите <strong>Загрузить распакованное</strong></li>
-                        <li>Укажите папку с расширением</li>
-                        <li>Обновите страницу</li>
+                        <li>Откройте страницу расширений вашего браузера</li>
+                        <li>Включите режим разработчика</li>
+                        <li>Загрузите распакованное расширение</li>
+                        <li>Укажите папку <code>build-chrome</code> (для Chromium) или <code>build-firefox</code> (для Firefox)</li>
                     </ol>
-                </details>
+                </div>
             </div>
 
             <!-- Настройки -->
@@ -365,6 +402,28 @@
         const SERVER_SCALE_NAMES_JSON = {{ scale_names | tojson | safe }};
         const SERVER_SCALES = {{ scales | tojson | safe }};
         const SERVER_DEFAULT_CUSTOM_POINTS = {{ scales.get('custom', []) | tojson | safe }};
+        
+        // Определяем браузер и показываем соответствующую инструкцию
+        (function() {
+            const userAgent = navigator.userAgent.toLowerCase();
+            const isFirefox = userAgent.includes('firefox');
+            const isEdge = userAgent.includes('edg');
+            const isChrome = userAgent.includes('chrome');
+            
+            // Скрываем все инструкции
+            document.getElementById('chromeInstallHelp').style.display = 'none';
+            document.getElementById('firefoxInstallHelp').style.display = 'none';
+            document.getElementById('otherInstallHelp').style.display = 'none';
+            
+            // Показываем нужную
+            if (isFirefox) {
+                document.getElementById('firefoxInstallHelp').style.display = 'block';
+            } else if (isEdge || isChrome) {
+                document.getElementById('chromeInstallHelp').style.display = 'block';
+            } else {
+                document.getElementById('otherInstallHelp').style.display = 'block';
+            }
+        })();
     </script>
     <script src="/static/script.js"></script>
 </body>

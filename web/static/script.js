@@ -2365,9 +2365,21 @@ function connectWebSocket(sessionId) {
         updateConnectionStatus('connected');
         state.reconnectAttempts = 0;
         state.ws.send(JSON.stringify({ type: 'join', username: state.username }));
+        
+        // Улучшенный ping-pong для поддержания соединения
+        clearInterval(state.pingInterval);
         state.pingInterval = setInterval(() => {
-            if (state.ws.readyState === WebSocket.OPEN) state.ws.send('ping');
-        }, 30000);
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                state.ws.send('ping');
+            }
+        }, 15000); // Уменьшили интервал до 15 секунд
+        
+        // Дополнительный heartbeat при возвращении на вкладку
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && state.ws && state.ws.readyState === WebSocket.OPEN) {
+                state.ws.send('ping');
+            }
+        });
     };
     
     state.ws.onmessage = (event) => {
@@ -2377,7 +2389,14 @@ function connectWebSocket(sessionId) {
             
             const message = JSON.parse(event.data);
             
-            // ✅ НОВОЕ: Обработка входа/выхода участников
+            // ✅ Обработка reconnect - пользователь вернулся после разрыва
+            if (message.type === 'reconnected') {
+                console.log('✅ Переподключение успешно');
+                updateSessionDisplay(message.data);
+                return;
+            }
+            
+            // ✅ Обработка входа/выхода участников
             if (message.type === 'user_joined') {
                 // Не играем звук для собственного входа
                 if (message.username !== state.username) {
@@ -2385,7 +2404,8 @@ function connectWebSocket(sessionId) {
                 }
                 updateSessionDisplay(message.data);
             } else if (message.type === 'user_left') {
-                soundManager.playLeave();
+                // НЕ показываем уведомление о выходе - это может быть временный разрыв
+                // soundManager.playLeave();
                 updateSessionDisplay(message.data);
             } else if (message.type === 'init' || message.type === 'update') {
                 const prevVoteCount = document.getElementById('voteCount').textContent;
@@ -2402,9 +2422,16 @@ function connectWebSocket(sessionId) {
     state.ws.onclose = () => {
         updateConnectionStatus('disconnected');
         clearInterval(state.pingInterval);
+        // Автоматическое переподключение с экспоненциальной задержкой
         if (state.sessionId && state.reconnectAttempts < 5) {
             state.reconnectAttempts++;
-            setTimeout(() => { if (state.sessionId) connectWebSocket(state.sessionId); }, 2000 * state.reconnectAttempts);
+            const delay = 2000 * state.reconnectAttempts;
+            console.log(`🔄 Переподключение через ${delay}мс (попытка ${state.reconnectAttempts})`);
+            setTimeout(() => { 
+                if (state.sessionId) {
+                    connectWebSocket(state.sessionId);
+                }
+            }, delay);
         }
     };
 }
@@ -2421,6 +2448,33 @@ function setScale(scaleName) {
     }
 }
 
+function toggleAutoReveal() {
+    const checkbox = document.getElementById('autoRevealToggle');
+    const autoReveal = checkbox.checked;
+    
+    fetch(`/api/sessions/${state.sessionId}/auto-reveal`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ auto_reveal: autoReveal })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.ok) {
+            toast.success(
+                autoReveal ? 'Автооткрытие включено' : 'Автооткрытие выключено',
+                'НАСТРОЙКА'
+            );
+        } else {
+            toast.error(data.error || 'Ошибка', 'ОШИБКА');
+            checkbox.checked = !autoReveal;
+        }
+    })
+    .catch(error => {
+        toast.error('Не удалось изменить настройку', 'ОШИБКА');
+        checkbox.checked = !autoReveal;
+    });
+}
+
 function updateSessionDisplay(session) {
     state.isInitiator = (session.initiator_id === `web_${state.username}`);
 
@@ -2432,6 +2486,15 @@ function updateSessionDisplay(session) {
         soundManager.playReveal();
     } else if (!session.revealed) {
         state.wasRevealed = false;
+    }
+    
+    // Обновляем состояние чекбокса автооткрытия
+    const autoRevealToggle = document.getElementById('autoRevealToggle');
+    if (autoRevealToggle) {
+        const sessionAutoReveal = session.auto_reveal || false;
+        if (autoRevealToggle.checked !== sessionAutoReveal) {
+            autoRevealToggle.checked = sessionAutoReveal;
+        }
     }
 
     // Парсим данные задачи (JSON от Jira или старый формат [KEY] Summary)

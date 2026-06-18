@@ -9,6 +9,33 @@ from ppbot.game import SCALES
 from web_api import enrich_session_response
 
 
+async def check_auto_reveal(session_id: str, game):
+    """Проверяет условие автооткрытия результатов при полном наборе голосов"""
+    if game.revealed:
+        return
+
+    # Проверяем включено ли автооткрытие
+    if not getattr(game, "auto_reveal", False):
+        return
+
+    # Получаем участников сессии
+    participants = manager.session_users.get(session_id, {})
+    if not participants:
+        return
+
+    # Если все участники проголосовали - автоматически открываем
+    voted_count = sum(1 for p in participants.values() if p.get("status") == "voted")
+    total_count = len(participants)
+
+    if voted_count > 0 and voted_count == total_count:
+        game.revealed = True
+        await state.storage.save_game(game)
+        logger.info(f"Auto-reveal: все {total_count} участников проголосовали в сессии {session_id}")
+
+        # Отправляем обновление всем
+        await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
+
+
 async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
     game = await state.storage.get_game(WEB_CHAT_ID, session_id)
     if not game:
@@ -20,6 +47,8 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         logger.info("transfer_initiator: %s was not the initiator", leaving_username)
         return
 
+    # НЕ передаем инициатора если есть другие участники в сессии
+    # Это предотвращает смену задачи при временном разрыве соединения
     if session_id not in manager.session_users or not manager.session_users[session_id]:
         logger.info(
             "transfer_initiator: no other participants, keeping %s as initiator in DB for session %s",
@@ -28,7 +57,19 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         )
         return
 
-    new_initiator_username = next(iter(manager.session_users[session_id].keys()))
+    # Проверяем - остались ли активные участники
+    active_participants = [
+        u for u, data in manager.session_users[session_id].items() if data.get("status") in ["pending", "voted"]
+    ]
+
+    if not active_participants:
+        logger.info(
+            "transfer_initiator: no active participants left, keeping %s as initiator",
+            leaving_username,
+        )
+        return
+
+    new_initiator_username = active_participants[0]
 
     game.initiator = {
         "id": f"web_{new_initiator_username}",
@@ -68,30 +109,70 @@ async def websocket_endpoint(websocket: WebSocket):
                         if username:
                             is_new = manager.register_user(session_id, username)
                             if game:
+                                # При reconnect отправляем текущее состояние
+                                current_data = enrich_session_response(game, session_id)
+
                                 if is_new:
                                     await manager.broadcast(
                                         session_id,
                                         {
                                             "type": "user_joined",
                                             "username": username,
-                                            "data": enrich_session_response(game, session_id),
+                                            "data": current_data,
                                         },
                                     )
                                 else:
+                                    # Пользователь переподключился - просто обновляем его состояние
+                                    await websocket.send_json({"type": "reconnected", "data": current_data})
                                     await manager.broadcast(
                                         session_id,
-                                        {"type": "update", "data": enrich_session_response(game, session_id)},
+                                        {"type": "update", "data": current_data},
                                     )
                     elif msg_type == "set_scale":
                         scale_name = msg.get("scale_name", "")
+                        setter_username = msg.get("username", "")
                         if game and scale_name in SCALES:
-                            game.scale_name = scale_name
-                            await state.storage.save_game(game)
-                            await manager.broadcast(
-                                session_id,
-                                {"type": "update", "data": enrich_session_response(game, session_id)},
+                            # Только инициатор может менять шкалу
+                            if f"web_{setter_username}" != game.initiator.get("id"):
+                                logger.warning(f"User {setter_username} is not initiator, cannot change scale")
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Только инициатор может менять шкалу"}
+                                )
+                            else:
+                                game.scale_name = scale_name
+                                await state.storage.save_game(game)
+                                await manager.broadcast(
+                                    session_id,
+                                    {"type": "update", "data": enrich_session_response(game, session_id)},
+                                )
+                    elif msg_type == "vote":
+                        # Обработка голосования с проверкой автооткрытия
+                        point = msg.get("point")
+                        vote_username = msg.get("username")
+                        if game and vote_username and point:
+                            user_id = f"web_{vote_username}"
+                            vote_data = {
+                                "user_id": user_id,
+                                "username": vote_username,
+                                "point": point,
+                                "real_point": point,
+                                "version": 0,
+                            }
+                            game.add_vote(
+                                {"id": user_id, "first_name": vote_username, "username": vote_username}, point
                             )
-                except Exception:
+                            await state.storage.save_game(game)
+
+                            manager.update_user_vote(session_id, vote_username, vote_data)
+
+                            # Отправляем обновление всем
+                            updated_data = enrich_session_response(game, session_id)
+                            await manager.broadcast(session_id, {"type": "update", "data": updated_data})
+
+                            # Проверяем автооткрытие
+                            await check_auto_reveal(session_id, game)
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}")
                     pass
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket, username, game)

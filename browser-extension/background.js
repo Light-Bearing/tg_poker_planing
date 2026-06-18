@@ -1,10 +1,14 @@
-// PP Jira Bridge — background service worker
-// Проксирует запросы из Planning Poker в Jira (обходит CORS)
+// PP Jira Bridge — background script
+// Работает в Chrome и Firefox благодаря polyfill
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+// Используем browser API (работает в обоих браузерах с polyfill)
+const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
+const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
+
+runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Сохранить настройки
   if (message.type === 'saveSettings') {
-    chrome.storage.local.set({
+    storage.local.set({
       jiraUrl: message.jiraUrl,
       jiraToken: message.jiraToken,
       jiraFilter: message.jiraFilter,
@@ -16,7 +20,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Получить настройки
   if (message.type === 'getSettings') {
-    chrome.storage.local.get(['jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField'], (result) => {
+    storage.local.get(['jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField'], (result) => {
       sendResponse(result);
     });
     return true;
@@ -109,3 +113,5 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+console.log('PP Jira Bridge background script loaded');
