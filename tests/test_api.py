@@ -299,18 +299,19 @@ class TestCustomScale:
         assert resp.status_code == 400
 
     def test_save_custom_scale(self, client):
+        points = [str(i * 10) for i in range(1, 9)]
         resp = client.post(
             "/api/custom-scale",
-            json={"username": "Alice", "points": ["10", "20", "30", "50", "100"]},
+            json={"username": "Alice", "points": points},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
-        assert data["points"] == ["10", "20", "30", "50", "100"]
+        assert data["points"] == points
 
         # Verify it's saved
         get_resp = client.get("/api/custom-scale", params={"username": "Alice"})
-        assert get_resp.json()["points"] == ["10", "20", "30", "50", "100"]
+        assert get_resp.json()["points"] == points
 
     def test_save_custom_scale_missing_username(self, client):
         resp = client.post("/api/custom-scale", json={"points": ["1", "2"]})
@@ -324,17 +325,37 @@ class TestCustomScale:
         assert resp.status_code == 400
 
     def test_save_custom_scale_too_few_points(self, client):
+        """Custom scale with < 8 points is rejected."""
         resp = client.post(
             "/api/custom-scale",
-            json={"username": "Alice", "points": ["1"]},
+            json={"username": "Alice", "points": ["10", "20", "30"]},
         )
         assert resp.status_code == 400
 
+    def test_save_custom_scale_duplicates_rejected(self, client):
+        """Custom scale with duplicate points is rejected."""
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": ["10", "20", "10", "30", "40", "50", "60", "70"]},
+        )
+        assert resp.status_code == 400
+
+    def test_save_custom_scale_minimum_points_accepted(self, client):
+        """Custom scale with exactly 8 points is accepted."""
+        points = [str(i) for i in range(1, 9)]
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": points},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
     def test_create_session_with_custom_scale_uses_saved_points(self, client):
         # Save custom scale first
+        points = [str(i * 10) for i in range(1, 9)]
         client.post(
             "/api/custom-scale",
-            json={"username": "Alice", "points": ["10", "20", "30", "❔", "☕"]},
+            json={"username": "Alice", "points": points},
         )
 
         # Create session with custom scale
@@ -346,12 +367,7 @@ class TestCustomScale:
         data = resp.json()
         assert data["scale_name"] == "custom"
         # Should include saved custom points
-        assert "10" in data["available_points"]
-        assert "20" in data["available_points"]
-        assert "30" in data["available_points"]
-        # The default AVAILABLE_POINTS also includes "4", "6", etc.
-        # But custom points should override the defaults
-        assert data["available_points"] == ["10", "20", "30", "❔", "☕"]
+        assert data["available_points"] == points
 
 
 class TestKick:

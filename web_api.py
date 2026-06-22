@@ -331,8 +331,12 @@ async def api_save_custom_scale(request: Request):
             return JSONResponse({"error": "username is required"}, status_code=400)
         if not isinstance(points, list) or not all(isinstance(p, str) for p in points):
             return JSONResponse({"error": "points must be a list of strings"}, status_code=400)
-        if len(points) < 2:
-            return JSONResponse({"error": "At least 2 points are required"}, status_code=400)
+        if len(points) < 8:
+            return JSONResponse(
+                {"error": "At least 8 points are required (standard scales have 8-12 points)"}, status_code=400
+            )
+        if len(points) != len(set(points)):
+            return JSONResponse({"error": "Duplicate points are not allowed"}, status_code=400)
 
         await state.storage.save_custom_scale(f"web_{username}", points)
         return JSONResponse({"ok": True, "points": points})
