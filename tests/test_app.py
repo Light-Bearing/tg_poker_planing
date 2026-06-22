@@ -640,7 +640,7 @@ class TestAPIErrorHandling:
         )
         tc = TestClient(app)
         with patch("web_api.state.storage.get_game", side_effect=Exception("db error")):
-            resp = tc.post("/api/sessions/test/scale", json={"scale_name": "fibonacci"})
+            resp = tc.post("/api/sessions/test/scale", json={"username": "Alice", "scale_name": "fibonacci"})
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())

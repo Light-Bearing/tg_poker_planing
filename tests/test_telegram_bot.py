@@ -471,6 +471,7 @@ class TestHandleScaleClick:
         query = AsyncMock()
         query.data = "scale-cycle-scale1"
         query.message.chat_id = -100
+        query.from_user.id = 1
         query.answer = AsyncMock()
         query.edit_message_text = AsyncMock()
 

@@ -260,7 +260,7 @@ class TestScale:
         session_id = create["session_id"]
         assert create["scale_name"] == "custom"
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"scale_name": "tshirt"})
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "tshirt"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["scale_name"] == "tshirt"
@@ -270,18 +270,18 @@ class TestScale:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={})
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice"})
         assert resp.status_code == 400
 
     def test_set_scale_session_not_found(self, client):
-        resp = client.post("/api/sessions/nonexistent/scale", json={"scale_name": "fibonacci"})
+        resp = client.post("/api/sessions/nonexistent/scale", json={"username": "Alice", "scale_name": "fibonacci"})
         assert resp.status_code == 404
 
     def test_set_scale_invalid_falls_back_to_default(self, client):
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"scale_name": "bogus"})
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "bogus"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["scale_name"] == "custom"
