@@ -1,7 +1,35 @@
 import collections
 import json
+from dataclasses import dataclass
+from typing import Any
 
 import aiosqlite
+
+
+@dataclass
+class Initiator:
+    """Represents a user who created a poker session (initiator).
+
+    Stored as a dict in SQLite for backward compatibility.
+    """
+    id: str
+    first_name: str
+    username: str = ""
+
+    @classmethod
+    def from_telegram_user(cls, user: Any) -> "Initiator":
+        return cls(id=str(user.id), first_name=user.first_name, username=getattr(user, "username", "") or "")
+
+    @classmethod
+    def from_web(cls, username: str) -> "Initiator":
+        return cls(id=f"web_{username}", first_name=username, username=username)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "first_name": self.first_name, "username": self.username}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Initiator":
+        return cls(id=str(data["id"]), first_name=data.get("first_name", ""), username=data.get("username", ""))
 
 AVAILABLE_POINTS = [
     "1",
@@ -80,7 +108,8 @@ class Game:
     def __init__(self, chat_id, vote_id, initiator, text, scale_name=None, custom_points=None, auto_reveal=False):
         self.chat_id = chat_id
         self.vote_id = vote_id
-        self.initiator = initiator
+        # Normalize initiator to Initiator dataclass (accepts dict for backward compat)
+        self.initiator = initiator if isinstance(initiator, Initiator) else Initiator.from_dict(initiator)
         self.text = text
         self.reply_message_id = 0
         self.votes = collections.defaultdict(Vote)
@@ -105,7 +134,7 @@ class Game:
         result = "{} for:\n{}\nInitiator: {}\nScale: {}".format(
             "Vote" if not self.revealed else "Results",
             self.text,
-            self._initiator_str(self.initiator),
+            f"@{self.initiator.username} ({self.initiator.first_name})",
             SCALE_NAMES.get(self.scale_name, self.scale_name),
         )
         if self.votes:
@@ -154,12 +183,18 @@ class Game:
         self.revealed = False
 
     @staticmethod
-    def _initiator_str(initiator: dict) -> str:
-        return "@{} ({})".format(initiator.get("username") or initiator.get("id"), initiator["first_name"])
+    def _initiator_str(initiator: object) -> str:
+        """Format a user (Initiator or dict) as a readable string."""
+        if isinstance(initiator, Initiator):
+            return "@{} ({})".format(initiator.username or initiator.id, initiator.first_name)
+        return "@{} ({})".format(
+            initiator.get("username") or initiator.get("id"),
+            initiator.get("first_name", "")
+        )
 
     def to_dict(self):
         data = {
-            "initiator": self.initiator,
+            "initiator": self.initiator.to_dict(),
             "text": self.text,
             "reply_message_id": self.reply_message_id,
             "revealed": self.revealed,
@@ -189,7 +224,7 @@ class Game:
         res = cls(
             chat_id,
             vote_id,
-            dct["initiator"],
+            Initiator.from_dict(dct["initiator"]),
             dct["text"],
             scale_name=dct.get("scale_name"),
             custom_points=dct.get("custom_points", []),

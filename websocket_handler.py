@@ -6,6 +6,7 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import SCALES
+from ppbot.game import Initiator
 from web_api import enrich_session_response, process_web_vote
 
 
@@ -43,7 +44,7 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         return
 
     leaving_id = f"web_{leaving_username}"
-    if game.initiator.get("id") != leaving_id:
+    if game.initiator.id != leaving_id:
         logger.info("transfer_initiator: %s was not the initiator", leaving_username)
         return
 
@@ -71,11 +72,7 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
 
     new_initiator_username = active_participants[0]
 
-    game.initiator = {
-        "id": f"web_{new_initiator_username}",
-        "first_name": new_initiator_username,
-        "username": new_initiator_username,
-    }
+    game.initiator = Initiator.from_web(new_initiator_username)
     await state.storage.save_game(game)
     logger.info(
         "Initiator role transferred: %s → %s in session %s",
@@ -134,7 +131,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         setter_username = msg.get("username", "")
                         if game and scale_name in SCALES:
                             # Только инициатор может менять шкалу
-                            if f"web_{setter_username}" != game.initiator.get("id"):
+                            if f"web_{setter_username}" != game.initiator.id:
                                 logger.warning(f"User {setter_username} is not initiator, cannot change scale")
                                 await websocket.send_json(
                                     {"type": "error", "message": "Только инициатор может менять шкалу"}
@@ -150,7 +147,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         target_username = msg.get("target_username", "")
                         kicker_username = msg.get("username", "")
                         if game and target_username and kicker_username:
-                            if f"web_{kicker_username}" != game.initiator.get("id"):
+                            if f"web_{kicker_username}" != game.initiator.id:
                                 await websocket.send_json(
                                     {"type": "error", "message": "Только инициатор может исключать участников"}
                                 )
