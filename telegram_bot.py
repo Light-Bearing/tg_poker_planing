@@ -81,6 +81,16 @@ async def handle_scale_click(query, data, chat_id):
     next_idx = (current_idx + 1) % len(scale_keys)
     game.scale_name = scale_keys[next_idx]
 
+    # If switching to custom scale, load saved custom points
+    if game.scale_name == "custom":
+        initiator_key = str(game.initiator.get("id", ""))
+        if initiator_key:
+            saved_points = await state.storage.get_custom_scale(initiator_key)
+            if saved_points:
+                game.custom_points = saved_points
+            else:
+                game.custom_points = []
+
     try:
         await query.edit_message_text(game.get_text(), reply_markup=game.get_markup())
         await state.storage.save_game(game)
