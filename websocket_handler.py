@@ -203,8 +203,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         point = msg.get("point")
                         vote_username = msg.get("username")
                         if game and vote_username and point:
-                            await process_web_vote(session_id, game, vote_username, point)
-                            await check_auto_reveal(session_id, game)
+                            if point not in game.get_points():
+                                await websocket.send_json(
+                                    {"type": "error", "message": f"Point '{point}' is not in the current scale ({game.scale_name})"}
+                                )
+                            else:
+                                await process_web_vote(session_id, game, vote_username, point)
+                                await check_auto_reveal(session_id, game)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
                     pass

@@ -425,13 +425,21 @@ class TestAutoRevealApi:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"auto_reveal": True})
+        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"username": "Alice", "auto_reveal": True})
         assert resp.status_code == 200
         data = resp.json()
         assert data["auto_reveal"] is True
 
         resp = client.get(f"/api/sessions/{session_id}")
         assert resp.json()["auto_reveal"] is True
+
+    def test_auto_reveal_rejects_non_initiator(self, client):
+        """Non-initiator cannot change auto-reveal."""
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"username": "Bob", "auto_reveal": True})
+        assert resp.status_code == 403
 
     def test_auto_reveal_persists_after_restart(self, client):
         create = client.post(
@@ -440,7 +448,8 @@ class TestAutoRevealApi:
         ).json()
         session_id = create["session_id"]
 
-        client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice"})
+        restart_resp = client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice"})
+        assert restart_resp.status_code == 200
 
         resp = client.get(f"/api/sessions/{session_id}")
         assert resp.status_code == 200
