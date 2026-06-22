@@ -6,7 +6,7 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import SCALES
-from web_api import enrich_session_response
+from web_api import enrich_session_response, process_web_vote
 
 
 async def check_auto_reveal(session_id: str, game):
@@ -197,30 +197,10 @@ async def websocket_endpoint(websocket: WebSocket):
                                         },
                                     )
                     elif msg_type == "vote":
-                        # Обработка голосования с проверкой автооткрытия
                         point = msg.get("point")
                         vote_username = msg.get("username")
                         if game and vote_username and point:
-                            user_id = f"web_{vote_username}"
-                            vote_data = {
-                                "user_id": user_id,
-                                "username": vote_username,
-                                "point": point,
-                                "real_point": point,
-                                "version": 0,
-                            }
-                            game.add_vote(
-                                {"id": user_id, "first_name": vote_username, "username": vote_username}, point
-                            )
-                            await state.storage.save_game(game)
-
-                            manager.update_user_vote(session_id, vote_username, vote_data)
-
-                            # Отправляем обновление всем
-                            updated_data = enrich_session_response(game, session_id)
-                            await manager.broadcast(session_id, {"type": "update", "data": updated_data})
-
-                            # Проверяем автооткрытие
+                            await process_web_vote(session_id, game, vote_username, point)
                             await check_auto_reveal(session_id, game)
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
