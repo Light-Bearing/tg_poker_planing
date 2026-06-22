@@ -159,13 +159,26 @@ class TestVoting:
         resp = client.post("/api/sessions/nonexistent/vote", json={"username": "Alice", "point": "5"})
         assert resp.status_code == 404
 
-    def test_vote_after_reveal_rejected(self, client):
+    def test_vote_after_reveal_returns_400_not_500(self, client):
+        """Vote after reveal returns 400, not 500."""
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
         client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
         resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
         assert resp.status_code == 400
+        assert "Session is already revealed" in resp.json().get("error", "")
+
+    def test_vote_after_reveal_rejected(self, client):
+        """Vote after reveal is rejected with 400."""
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+
+        client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
+        resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
+        assert resp.status_code == 400
+        data = resp.json()
+        assert "revealed" in data.get("error", "").lower()
 
 
 class TestReveal:
