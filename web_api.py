@@ -272,6 +272,18 @@ async def api_kick_user(request: Request):
         if not manager.kick_user(session_id, target_username):
             return JSONResponse({"error": "User not found in session"}, status_code=404)
 
+        # Close the kicked user's WebSocket
+        if kicked_ws:
+            try:
+                await kicked_ws.close(1000)
+            except Exception:
+                pass
+        # Also remove from active_connections
+        if session_id in manager.active_connections and kicked_ws in manager.active_connections[session_id]:
+            manager.active_connections[session_id].remove(kicked_ws)
+            if not manager.active_connections[session_id]:
+                del manager.active_connections[session_id]
+
         await manager.broadcast(
             session_id,
             {
