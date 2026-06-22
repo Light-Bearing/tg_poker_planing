@@ -569,3 +569,121 @@ class TestWebSocketEndpoint:
 
         updated = await state.storage.get_game("web", "test-session")
         assert updated.initiator.id == "web_bob"
+
+
+class TestCheckAutoReveal:
+    @pytest.mark.asyncio
+    async def test_auto_reveal_triggers_when_all_voted(self):
+        """Auto-reveal triggers when all participants have voted."""
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(
+            "web",
+            "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+        )
+        game.auto_reveal = True
+        await state.storage.save_game(game)
+
+        # Register 2 participants
+        manager.register_user("test-session", "alice")
+        manager.register_user("test-session", "bob")
+
+        # Both have voted via game.votes
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        game.add_vote({"id": "web_bob", "first_name": "Bob", "username": "bob"}, "3")
+        await state.storage.save_game(game)
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await check_auto_reveal("test-session", game)
+            assert game.revealed is True
+            mock_broadcast.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_auto_reveal_skipped_when_not_all_voted(self):
+        """Auto-reveal does NOT trigger when not all participants voted."""
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(
+            "web",
+            "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+        )
+        game.auto_reveal = True
+        await state.storage.save_game(game)
+
+        # Register 2 participants but only 1 voted
+        manager.register_user("test-session", "alice")
+        manager.register_user("test-session", "bob")
+
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await check_auto_reveal("test-session", game)
+            assert game.revealed is False
+            mock_broadcast.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_reveal_skipped_when_disabled(self):
+        """Auto-reveal does NOT trigger when auto_reveal=False."""
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(
+            "web",
+            "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+        )
+        game.auto_reveal = False
+        await state.storage.save_game(game)
+
+        manager.register_user("test-session", "alice")
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await check_auto_reveal("test-session", game)
+            assert game.revealed is False
+            mock_broadcast.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_reveal_skipped_when_already_revealed(self):
+        """Auto-reveal does NOT trigger when already revealed."""
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(
+            "web",
+            "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+        )
+        game.auto_reveal = True
+        game.revealed = True
+        await state.storage.save_game(game)
+
+        manager.register_user("test-session", "alice")
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await check_auto_reveal("test-session", game)
+            mock_broadcast.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auto_reveal_skipped_when_no_participants(self):
+        """Auto-reveal does NOT trigger when no participants registered."""
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(
+            "web",
+            "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+        )
+        game.auto_reveal = True
+        await state.storage.save_game(game)
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await check_auto_reveal("test-session", game)
+            mock_broadcast.assert_not_called()
