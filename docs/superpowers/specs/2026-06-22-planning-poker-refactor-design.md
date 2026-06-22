@@ -32,9 +32,12 @@ if (scaleName !== (data.scale_name || 'custom')) {
 
 ---
 
-### A2. Transfer инициатора: отделить активные WS от session_users
+### A2. Transfer инициатора + механизм кика отвалившихся
 
-**Проблема:** `transfer_initiator_if_needed` использует `session_users` для определения «кто онлайн». Но `session_users` НЕ чистится при дисконнекте — это сделано намеренно, чтобы авто-вскрытие работало корректно (ждёт голоса всех зарегистрированных, включая отвалившихся). В результате `transfer_initiator` может ошибочно посчитать отключившегося как активного участника.
+**Проблема:** `transfer_initiator_if_needed` использует `session_users` для определения «кто онлайн».
+Но `session_users` НЕ чистится при дисконнекте — это сделано намеренно, чтобы авто-вскрытие
+работало корректно (ждёт голоса всех зарегистрированных, включая отвалившихся).
+В результате `transfer_initiator` может ошибочно посчитать отключившегося как активного участника.
 
 **Сценарий:**
 1. Alice создала комнату (initiator)
@@ -43,7 +46,11 @@ if (scaleName !== (data.scale_name || 'custom')) {
 4. `transfer_initiator_if_needed` видит Bob'а в `session_users` со статусом `"voted"` → не передаёт инициатор
 5. При reconnect Bob — нет initiator'а, никто не может открыть/рестартнуть
 
-**Решение:** Добавить в `ConnectionManager` отдельный трекер `ws_user_map: dict[str, set[str]]` — какие username имеют активное WebSocket-соединение. `transfer_initiator_if_needed` проверяет этот map.
+**Решение (два изменения):**
+
+**A2a. Трекинг активных WS-подключений:**
+Добавить в `ConnectionManager` отдельный трекер — какие username имеют активное WebSocket.
+`session_users` остаётся как есть (для авто-вскрытия).
 
 ```python
 class ConnectionManager:
@@ -53,12 +60,26 @@ class ConnectionManager:
         self.ws_username_map: dict[str, set[str]] = {}           # session_id → {username с активным WS}
 ```
 
-**Изменения:**
-- `connection.py`: добавить `ws_username_map`, методы `register_ws_connection(session_id, username)`, `unregister_ws_connection(session_id, username)`
-- `websocket_handler.py`: при `join(username)` → `register_ws_connection`; при `WebSocketDisconnect` → `unregister_ws_connection`
-- `websocket_handler.py`: `transfer_initiator_if_needed` → проверять `ws_username_map`, а не `session_users`
+- `connection.py`: добавить `ws_username_map`, методы `register_ws_connection`, `unregister_ws_connection`
+- `websocket_handler.py`: при `join(username)` → `register_ws_connection`;
+  при `WebSocketDisconnect` → `unregister_ws_connection`
+- `transfer_initiator_if_needed` → проверять `ws_username_map`, а не `session_users`
 
-**Файлы:** `connection.py`, `websocket_handler.py`
+**A2b. Механизм кика участников (инициатор):**
+Инициатор может кикнуть **любого** участника комнаты (не только отвалившихся).
+Нужно для: удаление "зависших", случайно зашедших, тех кто мешает голосованию.
+
+- **WebSocket:** новый тип сообщения `{"type": "kick_user", "target_username": "bob"}`, проверка что отправитель — initiator
+- **REST:** `POST /api/sessions/{session_id}/kick` с `{username, target_username}`
+- **Действие при кике:**
+  1. Удалить пользователя из `session_users[session_id]`
+  2. Удалить из `ws_username_map[session_id]`
+  3. Разорвать его WebSocket-соединение (если активно), отправив ему `{"type": "kicked"}`
+  4. Разослать всем `{"type": "user_kicked", "username": "...", "data": ...}`
+- **UI (initiator):** рядом с именем любого участника (кроме себя) появляется кнопка ✕;
+  при кике — подтверждение через `ConfirmManager`
+
+**Файлы:** `connection.py`, `websocket_handler.py`, `web_api.py`, `web/static/script.js`
 
 ---
 
