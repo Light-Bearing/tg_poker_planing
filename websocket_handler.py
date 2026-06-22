@@ -48,20 +48,26 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         logger.info("transfer_initiator: %s was not the initiator", leaving_username)
         return
 
-    # НЕ передаем инициатора если есть другие участники в сессии
-    # Это предотвращает смену задачи при временном разрыве соединения
+    # Проверяем что в сессии есть другие участники
     if session_id not in manager.session_users or not manager.session_users[session_id]:
         logger.info(
-            "transfer_initiator: no other participants, keeping %s as initiator in DB for session %s",
+            "transfer_initiator: no participants in session, keeping %s as initiator",
             leaving_username,
-            session_id,
         )
         return
 
-    # Проверяем - остались ли активные участники (с активным WS)
-    active_participants = [
-        u for u in manager.session_users.get(session_id, {}) if manager.is_ws_connected(session_id, u)
-    ]
+    participants = manager.session_users[session_id]
+
+    # Если в сессии только инициатор — не передаём
+    if len(participants) == 1 and leaving_username in participants:
+        logger.info(
+            "transfer_initiator: only initiator in session, keeping %s as initiator",
+            leaving_username,
+        )
+        return
+
+    # Проверяем остались ли активные участники (с активным WS подключением)
+    active_participants = [u for u in participants if manager.is_ws_connected(session_id, u) and u != leaving_username]
 
     if not active_participants:
         logger.info(
