@@ -36,18 +36,6 @@ def ws():
     return w
 
 
-class MockWs(MagicMock):
-    """A pre-configured mock WebSocket for testing purposes."""
-
-    def __init__(self, **kwargs):
-        super().__init__(spec=WebSocket, **kwargs)
-        self.accept = AsyncMock()
-        self.send_json = AsyncMock()
-        self.send_text = AsyncMock()
-        self.receive_text = AsyncMock()
-        self.path_params = {"session_id": "test-session"}
-
-
 class SimpleMockWs:
     """Minimal WebSocket mock for kick testing."""
 

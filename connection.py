@@ -24,6 +24,9 @@ class ConnectionManager:
                 self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
+        # Clean up ws_username_map on disconnect
+        if session_id in self.ws_username_map and username:
+            self.ws_username_map[session_id].discard(username)
         # НЕ удаляем пользователя из session_users при disconnect
         # Это позволяет сохранить состояние при временном разрыве (переключение вкладок)
         # Пользователь будет удален только при явном уходе или таймауте
@@ -93,6 +96,14 @@ class ConnectionManager:
         del self.session_users[session_id][target_username]
         if not self.session_users[session_id]:
             del self.session_users[session_id]
+        # Clean up active_connections
+        if session_id in self.active_connections:
+            ws = self._ws_connections.get(session_id, {}).get(target_username)
+            if ws and ws in self.active_connections[session_id]:
+                self.active_connections[session_id].remove(ws)
+                if not self.active_connections[session_id]:
+                    del self.active_connections[session_id]
+
         # Clean up WS tracking
         if session_id in self.ws_username_map:
             self.ws_username_map[session_id].discard(target_username)
