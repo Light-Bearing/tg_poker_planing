@@ -125,6 +125,38 @@ class ConnectionManager:
             for username in self.session_users[session_id]:
                 self.session_users[session_id][username] = {"status": "pending", "vote": None}
 
+    async def cleanup_session(self, session_id: str):
+        """Полная очистка сессии: закрывает WS, удаляет все трекеры.
+
+        Вызывается когда сессия завершена и больше не нужна.
+        """
+        if session_id in self.active_connections:
+            for ws in self.active_connections[session_id]:
+                try:
+                    await ws.close(1000)
+                except Exception:
+                    pass
+            del self.active_connections[session_id]
+
+        self.session_users.pop(session_id, None)
+        self.ws_username_map.pop(session_id, None)
+        self._ws_connections.pop(session_id, None)
+
+    def cleanup_old_sessions(self, max_age_minutes: int = 60):
+        """Очистка неактивных сессий.
+
+        Удаляет сессии, которые не имеют активных WS-подключений.
+        """
+        stale_sessions = []
+        for session_id in self.session_users:
+            if session_id not in self.active_connections or not self.active_connections[session_id]:
+                stale_sessions.append(session_id)
+
+        for session_id in stale_sessions:
+            self.session_users.pop(session_id, None)
+            self.ws_username_map.pop(session_id, None)
+            self._ws_connections.pop(session_id, None)
+
     def _get_enriched_data(self, session_id: str, game: object = None):
         if game is None:
             return {"session_id": session_id, "participants": []}
