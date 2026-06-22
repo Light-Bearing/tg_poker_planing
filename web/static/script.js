@@ -2394,6 +2394,13 @@ function connectWebSocket(sessionId) {
                 // НЕ показываем уведомление о выходе - это может быть временный разрыв
                 // soundManager.playLeave();
                 updateSessionDisplay(message.data);
+            } else if (message.type === 'kicked') {
+                toast.error(message.message || 'Вы были исключены из комнаты', 'ИСКЛЮЧЕНИЕ');
+                setTimeout(() => leaveSession(), 2000);
+                return;
+            } else if (message.type === 'user_kicked') {
+                updateSessionDisplay(message.data);
+                return;
             } else if (message.type === 'init' || message.type === 'update') {
                 const prevVoteCount = document.getElementById('voteCount').textContent;
                 updateSessionDisplay(message.data);
@@ -2711,6 +2718,7 @@ function renderParticipants(session) {
                     <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
                     <span class="participant-name" title="${p.username}">${p.username}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
+                    ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${p.username}" onclick="kickParticipant('${p.username}')" title="Исключить">✕</button>` : ''}
                     ${!session.revealed && hasVoted ? '<span class="vote-dot" title="Проголосовал"></span>' : ''}
                 </div>
                 <div class="participant-vote-area">
@@ -2888,6 +2896,24 @@ function checkAutoReveal(session) {
             clearTimeout(autoRevealTimer);
             autoRevealTimer = null;
         }
+    }
+}
+
+async function kickParticipant(targetUsername) {
+    const confirmed = await confirmDialog.show(
+        `Исключить участника ${targetUsername}?`,
+        'ИСКЛЮЧЕНИЕ',
+        'ИСКЛЮЧИТЬ',
+        'ОТМЕНА'
+    );
+    if (!confirmed) return;
+
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({
+            type: 'kick_user',
+            username: state.username,
+            target_username: targetUsername
+        }));
     }
 }
 
