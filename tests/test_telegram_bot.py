@@ -492,3 +492,47 @@ class TestHandleScaleClick:
 
         await handle_scale_click(query, query.data, -100)
         query.answer.assert_awaited_with("Game not found", show_alert=True)
+
+
+class TestHandleScaleClickCustomScale:
+    @pytest.mark.asyncio
+    async def test_switching_to_custom_loads_saved_points(self):
+        from telegram_bot import handle_scale_click
+
+        await state.storage.save_custom_scale("1", ["10", "20", "30", "50", "100"])
+
+        game = state.storage.new_game(-100, "scale_custom1", {"id": 1, "first_name": "A", "username": "a"}, "task")
+        game.scale_name = "tshirt"
+        await state.storage.save_game(game)
+
+        query = AsyncMock()
+        query.data = "scale-cycle-scale_custom1"
+        query.message.chat_id = -100
+        query.from_user.id = 1
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handle_scale_click(query, query.data, -100)
+        updated = await state.storage.get_game(-100, "scale_custom1")
+        assert updated.scale_name == "custom"
+        assert updated.custom_points == ["10", "20", "30", "50", "100"]
+
+    @pytest.mark.asyncio
+    async def test_switching_to_custom_without_saved_points_uses_defaults(self):
+        from telegram_bot import handle_scale_click
+
+        game = state.storage.new_game(-100, "scale_custom2", {"id": 1, "first_name": "A", "username": "a"}, "task")
+        game.scale_name = "tshirt"
+        await state.storage.save_game(game)
+
+        query = AsyncMock()
+        query.data = "scale-cycle-scale_custom2"
+        query.message.chat_id = -100
+        query.from_user.id = 1
+        query.answer = AsyncMock()
+        query.edit_message_text = AsyncMock()
+
+        await handle_scale_click(query, query.data, -100)
+        updated = await state.storage.get_game(-100, "scale_custom2")
+        assert updated.scale_name == "custom"
+        assert updated.custom_points == []
