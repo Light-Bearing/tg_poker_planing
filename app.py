@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 import state
-from config import logger
+from config import CORS_ORIGINS, logger
 from connection import manager
 from ppbot.game import GameRegistry
 from telegram_bot import init_bot, telegram_webhook
@@ -83,7 +83,7 @@ async def build_app():
 
     starlette_app = Starlette(
         routes=routes,
-        middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
+        middleware=[Middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])],
         lifespan=lifespan,
     )
 
