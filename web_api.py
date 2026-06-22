@@ -173,8 +173,11 @@ async def api_get_session(request: Request):
 async def process_web_vote(session_id: str, game, username: str, point: str):
     """Process a vote from a web user and broadcast the update.
 
+    Validates that the point belongs to the game's scale.
     Returns the enriched session data dict.
     """
+    if point not in game.get_points():
+        raise ValueError(f"Point '{point}' is not in the current scale ({game.scale_name})")
     user_id = f"web_{username}"
     vote_data = {"user_id": user_id, "username": username, "point": point, "real_point": point, "version": 0}
     game.add_vote({"id": user_id, "first_name": username, "username": username}, point)

@@ -285,7 +285,7 @@ class TestGame:
         assert d["average"] == 0
 
     def test_average_skips_unparseable_point(self, sample_game):
-        sample_game.add_vote({"id": 1, "first_name": "A", "username": "a"}, "abc")
+        sample_game.add_vote({"id": 1, "first_name": "A", "username": "a"}, "not_a_number")
         d = sample_game.to_dict()
         assert d["average"] == 3.0  # only initiator's "3" is numeric
 
