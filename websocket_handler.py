@@ -5,8 +5,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
-from ppbot.game import SCALES
-from ppbot.game import Initiator
+from ppbot.game import SCALES, Initiator
 from web_api import enrich_session_response, process_web_vote
 
 
@@ -24,8 +23,9 @@ async def check_auto_reveal(session_id: str, game):
     if not participants:
         return
 
-    # Если все участники проголосовали - автоматически открываем
-    voted_count = sum(1 for p in participants.values() if p.get("status") == "voted")
+    # Проверяем голоса из game.votes, а не статус из session_users
+    # Это надежнее, т.к. game.votes гарантированно синхронизирован с БД
+    voted_count = len(game.votes)
     total_count = len(participants)
 
     if voted_count > 0 and voted_count == total_count:
