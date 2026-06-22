@@ -170,6 +170,21 @@ async def api_get_session(request: Request):
     return JSONResponse(enrich_session_response(game, request.path_params["session_id"]))
 
 
+async def process_web_vote(session_id: str, game, username: str, point: str):
+    """Process a vote from a web user and broadcast the update.
+
+    Returns the enriched session data dict.
+    """
+    user_id = f"web_{username}"
+    vote_data = {"user_id": user_id, "username": username, "point": point, "real_point": point, "version": 0}
+    game.add_vote({"id": user_id, "first_name": username, "username": username}, point)
+    await state.storage.save_game(game)
+    manager.update_user_vote(session_id, username, vote_data)
+    updated_data = enrich_session_response(game, session_id)
+    await manager.broadcast(session_id, {"type": "update", "data": updated_data})
+    return updated_data
+
+
 async def api_vote(request: Request):
     session_id = request.path_params["session_id"]
     try:
@@ -184,15 +199,8 @@ async def api_vote(request: Request):
         if game.revealed:
             return JSONResponse({"error": "Session is already revealed"}, status_code=400)
 
-        user_id = f"web_{username}"
-        vote_data = {"user_id": user_id, "username": username, "point": point, "real_point": point, "version": 0}
-        game.add_vote({"id": user_id, "first_name": username, "username": username}, point)
-        await state.storage.save_game(game)
-
-        manager.update_user_vote(session_id, username, vote_data)
-        await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
-
-        return JSONResponse(enrich_session_response(game, session_id))
+        updated_data = await process_web_vote(session_id, game, username, point)
+        return JSONResponse(updated_data)
     except Exception as e:
         logger.error(f"Error voting: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
