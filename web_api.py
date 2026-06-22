@@ -146,10 +146,18 @@ async def api_set_auto_reveal(request: Request):
     try:
         data = await request.json()
         auto_reveal = data.get("auto_reveal", False)
+        username = data.get("username", "").strip()
+
+        if not username:
+            return JSONResponse({"error": "username is required"}, status_code=400)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
+
+        # Только инициатор может менять auto-reveal
+        if f"web_{username}" != game.initiator.id:
+            return JSONResponse({"error": "Only initiator can change auto-reveal"}, status_code=403)
 
         game.auto_reveal = bool(auto_reveal)
         await state.storage.save_game(game)

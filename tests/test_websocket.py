@@ -734,3 +734,33 @@ class TestCheckAutoReveal:
         with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
             await check_auto_reveal("test-session", game)
             mock_broadcast.assert_not_called()
+
+
+class TestWebSocketVoteValidation:
+    @pytest.mark.asyncio
+    async def test_websocket_rejects_invalid_point(self, ws):
+        """WebSocket vote with point not in scale returns error."""
+        game = state.storage.new_game(
+            "web", "test-session",
+            {"id": "web_alice", "first_name": "Alice", "username": "alice"},
+            "task",
+            scale_name="fibonacci",
+        )
+        await state.storage.save_game(game)
+
+        ws.receive_text.side_effect = [
+            '{"type": "join", "username": "alice"}',
+            '{"type": "vote", "username": "alice", "point": "99"}',
+            WebSocketDisconnect(),
+        ]
+        ws.send_json.reset_mock()
+        await websocket_endpoint(ws)
+
+        error_calls = [
+            call for call in ws.send_json.await_args_list
+            if call[0][0].get("type") == "error"
+        ]
+        assert len(error_calls) >= 1
+        message = error_calls[0].args[0].get("message", "")
+        assert "99" in message
+        assert "fibonacci" in message
