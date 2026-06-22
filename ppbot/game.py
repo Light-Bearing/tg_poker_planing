@@ -242,6 +242,9 @@ class GameRegistry:
 
     async def init_db(self, db_path):
         self._db = await aiosqlite.connect(db_path)
+        # Enable WAL mode for concurrent read/write performance
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute("""
             CREATE TABLE IF NOT EXISTS games (
                 chat_id, game_id,
