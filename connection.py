@@ -1,9 +1,15 @@
 from starlette.websockets import WebSocket
 
-from ppbot.game import Game
-
 
 class ConnectionManager:
+    """Manages WebSocket connections, user registration, and session state.
+
+    Tracks three levels of state per session:
+    - active_connections: raw WebSocket objects for broadcasting
+    - session_users: all users who joined (persists across reconnects, used for auto-reveal)
+    - ws_username_map + _ws_connections: users with currently active WS (for initiator transfer)
+    """
+
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
         self.session_users: dict[str, dict[str, dict]] = {}
@@ -11,6 +17,7 @@ class ConnectionManager:
         self._ws_connections: dict[str, dict[str, WebSocket]] = {}
 
     async def connect(self, session_id: str, websocket: WebSocket):
+        """Accept and register a new WebSocket connection for a session."""
         await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = []
@@ -18,33 +25,22 @@ class ConnectionManager:
             self.session_users[session_id] = {}
         self.active_connections[session_id].append(websocket)
 
-    def disconnect(self, session_id: str, websocket: WebSocket, username: str = None, game: Game = None):
+    def disconnect(self, session_id: str, websocket: WebSocket, username: str = None, game: object = None):
+        """Remove a WebSocket from the session.
+
+        Does NOT remove the user from session_users — that persists for reconnection
+        and auto-reveal counting. Use kick_user() for permanent removal.
+        """
         if session_id in self.active_connections:
             if websocket in self.active_connections[session_id]:
                 self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
-        # Clean up ws_username_map on disconnect
         if session_id in self.ws_username_map and username:
             self.ws_username_map[session_id].discard(username)
-        # НЕ удаляем пользователя из session_users при disconnect
-        # Это позволяет сохранить состояние при временном разрыве (переключение вкладок)
-        # Пользователь будет удален только при явном уходе или таймауте
-        # if username and session_id in self.session_users:
-        #     if username in self.session_users[session_id]:
-        #         del self.session_users[session_id][username]
-        #         asyncio.create_task(
-        #             self.broadcast(
-        #                 session_id,
-        #                 {
-        #                     "type": "user_left",
-        #                     "username": username,
-        #                     "data": self._get_enriched_data(session_id, game),
-        #                 },
-        #             )
-        #         )
 
     async def broadcast(self, session_id: str, message: dict):
+        """Send a JSON message to all WebSocket clients in a session."""
         if session_id in self.active_connections:
             disconnected = []
             for connection in self.active_connections[session_id]:
@@ -55,7 +51,8 @@ class ConnectionManager:
             for conn in disconnected:
                 self.disconnect(session_id, conn)
 
-    def register_user(self, session_id: str, username: str):
+    def register_user(self, session_id: str, username: str) -> bool:
+        """Register a user in the session. Returns True if user is new (first join)."""
         if session_id not in self.session_users:
             self.session_users[session_id] = {}
         is_new = username not in self.session_users[session_id]
@@ -64,6 +61,7 @@ class ConnectionManager:
         return is_new
 
     def register_ws_connection(self, session_id: str, username: str, websocket: WebSocket):
+        """Track a user's active WebSocket connection (called on join/reconnect)."""
         if session_id not in self.ws_username_map:
             self.ws_username_map[session_id] = set()
             self._ws_connections[session_id] = {}
@@ -71,6 +69,7 @@ class ConnectionManager:
         self._ws_connections[session_id][username] = websocket
 
     def unregister_ws_connection(self, session_id: str, username: str):
+        """Remove user from active WS tracking (called on disconnect)."""
         if session_id in self.ws_username_map:
             self.ws_username_map[session_id].discard(username)
             self._ws_connections[session_id].pop(username, None)
@@ -126,7 +125,7 @@ class ConnectionManager:
             for username in self.session_users[session_id]:
                 self.session_users[session_id][username] = {"status": "pending", "vote": None}
 
-    def _get_enriched_data(self, session_id: str, game: Game = None):
+    def _get_enriched_data(self, session_id: str, game: object = None):
         if game is None:
             return {"session_id": session_id, "participants": []}
         from web_api import enrich_session_response
