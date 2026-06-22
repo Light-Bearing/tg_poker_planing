@@ -7,6 +7,8 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict[str, list[WebSocket]] = {}
         self.session_users: dict[str, dict[str, dict]] = {}
+        self.ws_username_map: dict[str, set[str]] = {}
+        self._ws_connections: dict[str, dict[str, WebSocket]] = {}
 
     async def connect(self, session_id: str, websocket: WebSocket):
         await websocket.accept()
@@ -57,6 +59,30 @@ class ConnectionManager:
         if is_new:
             self.session_users[session_id][username] = {"status": "pending", "vote": None}
         return is_new
+
+    def register_ws_connection(self, session_id: str, username: str, websocket: WebSocket):
+        if session_id not in self.ws_username_map:
+            self.ws_username_map[session_id] = set()
+            self._ws_connections[session_id] = {}
+        self.ws_username_map[session_id].add(username)
+        self._ws_connections[session_id][username] = websocket
+
+    def unregister_ws_connection(self, session_id: str, username: str):
+        if session_id in self.ws_username_map:
+            self.ws_username_map[session_id].discard(username)
+            self._ws_connections[session_id].pop(username, None)
+            if not self.ws_username_map[session_id]:
+                del self.ws_username_map[session_id]
+                del self._ws_connections[session_id]
+
+    def is_ws_connected(self, session_id: str, username: str) -> bool:
+        return username in self.ws_username_map.get(session_id, set())
+
+    def get_active_ws_usernames(self, session_id: str) -> set[str]:
+        return self.ws_username_map.get(session_id, set()).copy()
+
+    def get_ws_by_username(self, session_id: str, username: str) -> WebSocket | None:
+        return self._ws_connections.get(session_id, {}).get(username)
 
     def update_user_vote(self, session_id: str, username: str, vote_data: dict):
         if session_id in self.session_users and username in self.session_users[session_id]:

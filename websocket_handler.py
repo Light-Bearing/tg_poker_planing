@@ -57,9 +57,9 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         )
         return
 
-    # Проверяем - остались ли активные участники
+    # Проверяем - остались ли активные участники (с активным WS)
     active_participants = [
-        u for u, data in manager.session_users[session_id].items() if data.get("status") in ["pending", "voted"]
+        u for u in manager.session_users.get(session_id, {}) if manager.is_ws_connected(session_id, u)
     ]
 
     if not active_participants:
@@ -108,6 +108,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         username = msg.get("username")
                         if username:
                             is_new = manager.register_user(session_id, username)
+                            manager.register_ws_connection(session_id, username, websocket)
                             if game:
                                 # При reconnect отправляем текущее состояние
                                 current_data = enrich_session_response(game, session_id)
@@ -177,9 +178,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket, username, game)
         if username:
+            manager.unregister_ws_connection(session_id, username)
             await transfer_initiator_if_needed(session_id, username)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(session_id, websocket, username, game)
         if username:
+            manager.unregister_ws_connection(session_id, username)
             await transfer_initiator_if_needed(session_id, username)

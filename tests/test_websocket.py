@@ -13,6 +13,8 @@ from websocket_handler import transfer_initiator_if_needed, websocket_endpoint
 def _reset_manager():
     manager.active_connections.clear()
     manager.session_users.clear()
+    manager.ws_username_map.clear()
+    manager._ws_connections.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +34,67 @@ def ws():
     w.receive_text = AsyncMock()
     w.path_params = {"session_id": "test-session"}
     return w
+
+
+class MockWs(MagicMock):
+    """A pre-configured mock WebSocket for testing purposes."""
+
+    def __init__(self, **kwargs):
+        super().__init__(spec=WebSocket, **kwargs)
+        self.accept = AsyncMock()
+        self.send_json = AsyncMock()
+        self.send_text = AsyncMock()
+        self.receive_text = AsyncMock()
+        self.path_params = {"session_id": "test-session"}
+
+
+class TestWsUsernameMap:
+    def test_register_ws_connection_adds_user(self):
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        assert "alice" in manager.ws_username_map["s1"]
+
+    def test_register_ws_connection_stores_websocket(self):
+        ws = MagicMock()
+        manager.register_ws_connection("s1", "alice", ws)
+        assert manager.get_ws_by_username("s1", "alice") is ws
+
+    def test_register_ws_connection_overwrites_old_ws(self):
+        old_ws = MagicMock()
+        new_ws = MagicMock()
+        manager.register_ws_connection("s1", "alice", old_ws)
+        manager.register_ws_connection("s1", "alice", new_ws)
+        assert manager.get_ws_by_username("s1", "alice") is new_ws
+
+    def test_unregister_ws_connection_removes_user(self):
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        manager.register_ws_connection("s1", "bob", MagicMock())
+        manager.unregister_ws_connection("s1", "alice")
+        assert manager.ws_username_map["s1"] == {"bob"}
+        assert manager.get_ws_by_username("s1", "alice") is None
+
+    def test_unregister_ws_connection_removes_empty_set(self):
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        manager.unregister_ws_connection("s1", "alice")
+        assert "s1" not in manager.ws_username_map
+        assert "s1" not in manager._ws_connections
+
+    def test_unregister_ws_connection_unknown_session_does_nothing(self):
+        manager.unregister_ws_connection("nonexistent", "alice")  # no error
+
+    def test_is_ws_connected_returns_true(self):
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        assert manager.is_ws_connected("s1", "alice") is True
+
+    def test_is_ws_connected_returns_false(self):
+        assert manager.is_ws_connected("s1", "alice") is False
+
+    def test_get_active_ws_usernames_returns_set(self):
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        manager.register_ws_connection("s1", "bob", MagicMock())
+        assert manager.get_active_ws_usernames("s1") == {"alice", "bob"}
+
+    def test_get_active_ws_usernames_unknown_returns_empty_set(self):
+        assert manager.get_active_ws_usernames("nonexistent") == set()
 
 
 class TestConnectionManager:
@@ -245,8 +308,7 @@ class TestTransferInitiator:
         )
         await state.storage.save_game(game)
         manager.register_user("s1", "bob")
-        # alice is the initiator, but never registered as a ws user;
-        # only bob is in session_users — transfer should go to bob
+        manager.register_ws_connection("s1", "bob", MagicMock())
         with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
             await transfer_initiator_if_needed("s1", "alice")
             updated = await state.storage.get_game("web", "s1")
@@ -278,6 +340,38 @@ class TestTransferInitiator:
     @pytest.mark.asyncio
     async def test_no_game_found(self):
         await transfer_initiator_if_needed("nonexistent", "alice")
+
+    @pytest.mark.asyncio
+    async def test_transfers_when_initiator_disconnects_and_bob_has_active_ws(self):
+        game = state.storage.new_game(
+            "web", "s5", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("s5", "alice")
+        manager.register_user("s5", "bob")
+        manager.register_ws_connection("s5", "bob", MagicMock())
+        manager.unregister_ws_connection("s5", "alice")
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await transfer_initiator_if_needed("s5", "alice")
+            updated = await state.storage.get_game("web", "s5")
+            assert updated.initiator["id"] == "web_bob"
+            mock_broadcast.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_does_not_transfer_when_bob_has_no_active_ws(self):
+        game = state.storage.new_game(
+            "web", "s6", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("s6", "alice")
+        manager.register_user("s6", "bob")
+        # bob is in session_users but has NO active WS
+
+        with patch("connection.manager.broadcast", new=AsyncMock()):
+            await transfer_initiator_if_needed("s6", "alice")
+            updated = await state.storage.get_game("web", "s6")
+            assert updated.initiator["id"] == "web_alice"  # unchanged
 
 
 class TestWebSocketEndpoint:
@@ -397,6 +491,7 @@ class TestWebSocketEndpoint:
         # bob connects first
         await websocket_endpoint(bob_ws)
         manager.register_user("test-session", "bob")
+        manager.register_ws_connection("test-session", "bob", bob_ws)
 
         # alice connects and triggers exception
         await websocket_endpoint(alice_ws)
