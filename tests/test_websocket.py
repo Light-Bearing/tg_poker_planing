@@ -371,6 +371,53 @@ class TestTransferInitiator:
             updated = await state.storage.get_game("web", "s6")
             assert updated.initiator.id == "web_alice"  # unchanged
 
+    @pytest.mark.asyncio
+    async def test_does_not_transfer_when_only_initiator_in_session(self):
+        """Initiator leaves but is the only one in session → no transfer."""
+        game = state.storage.new_game(
+            "web", "s7", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("s7", "alice")
+
+        await transfer_initiator_if_needed("s7", "alice")
+        updated = await state.storage.get_game("web", "s7")
+        assert updated.initiator.id == "web_alice"
+
+    @pytest.mark.asyncio
+    async def test_transfers_to_active_user_not_disconnected_one(self):
+        """Transfer goes to user with active WS, not the one who just disconnected."""
+        game = state.storage.new_game(
+            "web", "s8", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("s8", "alice")
+        manager.register_user("s8", "bob")
+        manager.register_user("s8", "charlie")
+        manager.register_ws_connection("s8", "bob", MagicMock())
+
+        with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
+            await transfer_initiator_if_needed("s8", "alice")
+            updated = await state.storage.get_game("web", "s8")
+            assert updated.initiator.id == "web_bob"
+            mock_broadcast.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_does_not_transfer_when_leaving_user_not_initiator(self):
+        """Non-initiator leaving → no transfer needed."""
+        game = state.storage.new_game(
+            "web", "s9", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("s9", "alice")
+        manager.register_user("s9", "bob")
+        manager.register_ws_connection("s9", "bob", MagicMock())
+
+        with patch("connection.manager.broadcast", new=AsyncMock()):
+            await transfer_initiator_if_needed("s9", "bob")
+            updated = await state.storage.get_game("web", "s9")
+            assert updated.initiator.id == "web_alice"  # unchanged
+
 
 class TestKick:
     def test_kick_user_removes_from_session_users(self):
