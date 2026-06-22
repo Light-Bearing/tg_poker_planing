@@ -142,20 +142,21 @@ class ConnectionManager:
         self.ws_username_map.pop(session_id, None)
         self._ws_connections.pop(session_id, None)
 
-    def cleanup_old_sessions(self, max_age_minutes: int = 60):
+    def cleanup_old_sessions(self):
         """Очистка неактивных сессий.
 
         Удаляет сессии, которые не имеют активных WS-подключений.
         """
-        stale_sessions = []
-        for session_id in self.session_users:
-            if session_id not in self.active_connections or not self.active_connections[session_id]:
-                stale_sessions.append(session_id)
+        stale_sessions = [
+            sid for sid in self.session_users
+            if sid not in self.active_connections or not self.active_connections[sid]
+        ]
 
-        for session_id in stale_sessions:
-            self.session_users.pop(session_id, None)
-            self.ws_username_map.pop(session_id, None)
-            self._ws_connections.pop(session_id, None)
+        for sid in stale_sessions:
+            self.session_users.pop(sid, None)
+            self.ws_username_map.pop(sid, None)
+            self._ws_connections.pop(sid, None)
+            self.active_connections.pop(sid, None)
 
     def _get_enriched_data(self, session_id: str, game: object = None):
         if game is None:
