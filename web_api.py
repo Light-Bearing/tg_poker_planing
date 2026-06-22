@@ -242,6 +242,52 @@ async def api_reveal(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def api_kick_user(request: Request):
+    session_id = request.path_params["session_id"]
+    try:
+        data = await request.json()
+        username = data.get("username", "").strip()
+        target_username = data.get("target_username", "").strip()
+        if not username or not target_username:
+            return JSONResponse({"error": "username and target_username are required"}, status_code=400)
+
+        game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+        if not game:
+            return JSONResponse({"error": "Session not found"}, status_code=404)
+
+        if f"web_{username}" != game.initiator.get("id"):
+            return JSONResponse({"error": "Only initiator can kick users"}, status_code=403)
+
+        if target_username == username:
+            return JSONResponse({"error": "Cannot kick yourself"}, status_code=400)
+
+        # Send "kicked" message if they have active WS
+        kicked_ws = manager.get_ws_by_username(session_id, target_username)
+        if kicked_ws:
+            try:
+                await kicked_ws.send_json({"type": "kicked", "message": f"Вы были исключены инициатором {username}"})
+            except Exception:
+                pass
+
+        if not manager.kick_user(session_id, target_username):
+            return JSONResponse({"error": "User not found in session"}, status_code=404)
+
+        await manager.broadcast(
+            session_id,
+            {
+                "type": "user_kicked",
+                "username": target_username,
+                "data": enrich_session_response(game, session_id),
+            },
+        )
+
+        logger.info(f"User {target_username} kicked from session {session_id} by {username}")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        logger.error(f"Error kicking user: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 async def api_get_custom_scale(request: Request):
     username = request.query_params.get("username", "").strip()
     if not username:

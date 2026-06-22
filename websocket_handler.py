@@ -146,6 +146,41 @@ async def websocket_endpoint(websocket: WebSocket):
                                     session_id,
                                     {"type": "update", "data": enrich_session_response(game, session_id)},
                                 )
+                    elif msg_type == "kick_user":
+                        target_username = msg.get("target_username", "")
+                        kicker_username = msg.get("username", "")
+                        if game and target_username and kicker_username:
+                            if f"web_{kicker_username}" != game.initiator.get("id"):
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Только инициатор может исключать участников"}
+                                )
+                            elif target_username == kicker_username:
+                                await websocket.send_json({"type": "error", "message": "Нельзя исключить себя"})
+                            else:
+                                # Send "kicked" message to the kicked user
+                                kicked_ws = manager.get_ws_by_username(session_id, target_username)
+                                if kicked_ws:
+                                    try:
+                                        await kicked_ws.send_json(
+                                            {
+                                                "type": "kicked",
+                                                "message": f"Вы были исключены инициатором {kicker_username}",
+                                            }
+                                        )
+                                    except Exception:
+                                        pass  # connection may already be dead
+
+                                # Remove the user
+                                if manager.kick_user(session_id, target_username):
+                                    updated_data = enrich_session_response(game, session_id)
+                                    await manager.broadcast(
+                                        session_id,
+                                        {
+                                            "type": "user_kicked",
+                                            "username": target_username,
+                                            "data": updated_data,
+                                        },
+                                    )
                     elif msg_type == "vote":
                         # Обработка голосования с проверкой автооткрытия
                         point = msg.get("point")
