@@ -6,11 +6,18 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        args: [--ignore-missing-imports, --python-version=3.10]
+        additional_dependencies: [types-requests]
+
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: .venv/bin/pytest tests/ -v
+        entry: .venv/bin/python -m pytest tests/test_game.py tests/test_websocket.py tests/test_api.py -v
         language: script
         types: [python]
         pass_filenames: false
