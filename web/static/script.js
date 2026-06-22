@@ -2293,19 +2293,6 @@ async function joinOrCreateSession() {
             if (!response.ok) throw new Error('Комната не найдена');
             const data = await response.json();
             
-            // If the selected scale differs from the room's current scale, update it
-            if (scaleName !== (data.scale_name || 'custom')) {
-                const scaleResp = await fetch(`/api/sessions/${sessionId}/scale`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ scale_name: scaleName })
-                });
-                if (scaleResp.ok) {
-                    const updatedData = await scaleResp.json();
-                    Object.assign(data, updatedData);
-                }
-            }
-            
             // ✅ Определяем, являемся ли мы инициатором из данных сервера
             const isMeInitiator = data.initiator_id === `web_${username}`;
             enterSession(sessionId, data, isMeInitiator);
