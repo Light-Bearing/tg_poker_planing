@@ -17,6 +17,7 @@ from web_api import (
     api_restart,
     api_reveal,
     api_save_custom_scale,
+    api_set_auto_reveal,
     api_set_scale,
     api_vote,
     health,
@@ -61,6 +62,7 @@ def client():
         Route("/api/sessions/{session_id}/reveal", api_reveal, methods=["POST"]),
         Route("/api/sessions/{session_id}/scale", api_set_scale, methods=["POST"]),
         Route("/api/sessions/{session_id}/kick", api_kick_user, methods=["POST"]),
+        Route("/api/sessions/{session_id}/auto-reveal", api_set_auto_reveal, methods=["POST"]),
         Route("/api/custom-scale", api_get_custom_scale, methods=["GET"]),
         Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
@@ -385,3 +387,46 @@ class TestKick:
             f"/api/sessions/{session_id}/kick", json={"username": "Alice", "target_username": "nonexistent"}
         )
         assert resp.status_code == 404
+
+
+class TestAutoRevealApi:
+    def test_create_session_with_auto_reveal(self, client):
+        resp = client.post(
+            "/api/sessions",
+            json={"username": "Alice", "text": "My task", "auto_reveal": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["auto_reveal"] is True
+
+    def test_create_session_without_auto_reveal(self, client):
+        resp = client.post("/api/sessions", json={"username": "Alice", "text": "My task"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["auto_reveal"] is False
+
+    def test_set_auto_reveal_enable(self, client):
+        create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
+        session_id = create["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"auto_reveal": True})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["auto_reveal"] is True
+
+        resp = client.get(f"/api/sessions/{session_id}")
+        assert resp.json()["auto_reveal"] is True
+
+    def test_auto_reveal_persists_after_restart(self, client):
+        create = client.post(
+            "/api/sessions",
+            json={"username": "Alice", "text": "My task", "auto_reveal": True},
+        ).json()
+        session_id = create["session_id"]
+
+        client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice"})
+
+        resp = client.get(f"/api/sessions/{session_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["auto_reveal"] is True
