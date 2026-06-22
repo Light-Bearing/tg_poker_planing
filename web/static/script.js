@@ -1,3 +1,7 @@
+// ========================================================================
+// MODULE 1: GAME CORE — State, Session, WebSocket, Voting, Task Display
+// ========================================================================
+
 let state = {
     username: localStorage.getItem('pp_username') || '',
     sessionId: null,
@@ -8,6 +12,7 @@ let state = {
     wasRevealed: false,
     soundEnabled: localStorage.getItem('pp_sound_enabled') !== 'false'
 };
+
 // ==================== TOAST NOTIFICATION SYSTEM ====================
 class ToastManager {
     constructor() {
@@ -97,6 +102,10 @@ class ConfirmManager {
 
 const toast = new ToastManager();
 const confirmDialog = new ConfirmManager();
+
+// ========================================================================
+// MODULE 3: JIRA INTEGRATION — Connection, Issues, Tree, Estimate Send
+// ========================================================================
 
 // ==================== JIRA STATE ====================
 let jiraSettings = JSON.parse(localStorage.getItem('pp_jira_settings') || '{}');
@@ -1250,6 +1259,10 @@ function closeConfirmModal(result) {
     confirmDialog.close(result);
 }
 
+// ========================================================================
+// MODULE 4: SCALES — Scale Selector, Custom Scale Editor, Join Screen
+// ========================================================================
+
 // ==================== JOIN SCREEN HELPERS ====================
 let SERVER_SCALE_NAMES = {};       // populated from server: {custom: "Custom", fibonacci: "Fibonacci", ...}
 let CURRENT_SCALE_NAME = localStorage.getItem('pp_last_scale') || "custom";  // current scale for this session
@@ -1667,7 +1680,7 @@ class SoundManager {
 
 const soundManager = new SoundManager();
 
-// ==================== EXISTING CODE ====================
+// === SESSION SCREEN — Theme, hotkeys, join/create, leave ===
 
 function initTheme() {
     const savedTheme = localStorage.getItem('pp_theme') || 'dark';
