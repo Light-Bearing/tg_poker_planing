@@ -1,3 +1,5 @@
+import asyncio
+
 from starlette.websockets import WebSocket
 
 
@@ -38,6 +40,12 @@ class ConnectionManager:
                 del self.active_connections[session_id]
         if session_id in self.ws_username_map and username:
             self.ws_username_map[session_id].discard(username)
+
+        # Notify remaining participants that this user left
+        if username and session_id in self.active_connections:
+            asyncio.create_task(
+                self.broadcast(session_id, {"type": "user_left", "username": username})
+            )
 
     async def broadcast(self, session_id: str, message: dict):
         """Send a JSON message to all WebSocket clients in a session."""
