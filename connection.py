@@ -84,6 +84,27 @@ class ConnectionManager:
     def get_ws_by_username(self, session_id: str, username: str) -> WebSocket | None:
         return self._ws_connections.get(session_id, {}).get(username)
 
+    def kick_user(self, session_id: str, target_username: str) -> bool:
+        """Remove a user from the session. Returns True if user was found and removed."""
+        if session_id not in self.session_users:
+            return False
+        if target_username not in self.session_users[session_id]:
+            return False
+        del self.session_users[session_id][target_username]
+        if not self.session_users[session_id]:
+            del self.session_users[session_id]
+        # Clean up WS tracking
+        if session_id in self.ws_username_map:
+            self.ws_username_map[session_id].discard(target_username)
+        if session_id in self._ws_connections:
+            self._ws_connections[session_id].pop(target_username, None)
+        # Clean up empty session WS tracking
+        if session_id in self.ws_username_map and not self.ws_username_map[session_id]:
+            del self.ws_username_map[session_id]
+        if session_id in self._ws_connections and not self._ws_connections[session_id]:
+            del self._ws_connections[session_id]
+        return True
+
     def update_user_vote(self, session_id: str, username: str, vote_data: dict):
         if session_id in self.session_users and username in self.session_users[session_id]:
             self.session_users[session_id][username]["status"] = "voted"

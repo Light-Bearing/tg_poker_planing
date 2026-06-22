@@ -48,6 +48,16 @@ class MockWs(MagicMock):
         self.path_params = {"session_id": "test-session"}
 
 
+class SimpleMockWs:
+    """Minimal WebSocket mock for kick testing."""
+
+    async def send_json(self, data):
+        pass
+
+    async def close(self, code=1000):
+        pass
+
+
 class TestWsUsernameMap:
     def test_register_ws_connection_adds_user(self):
         manager.register_ws_connection("s1", "alice", MagicMock())
@@ -372,6 +382,79 @@ class TestTransferInitiator:
             await transfer_initiator_if_needed("s6", "alice")
             updated = await state.storage.get_game("web", "s6")
             assert updated.initiator["id"] == "web_alice"  # unchanged
+
+
+class TestKick:
+    def test_kick_user_removes_from_session_users(self):
+        manager.register_user("s1", "alice")
+        manager.register_user("s1", "bob")
+        result = manager.kick_user("s1", "bob")
+        assert result is True
+        assert "bob" not in manager.session_users["s1"]
+
+    def test_kick_user_removes_from_ws_username_map(self):
+        manager.register_user("s1", "alice")
+        manager.register_user("s1", "bob")
+        manager.register_ws_connection("s1", "bob", MagicMock())
+        manager.kick_user("s1", "bob")
+        assert manager.is_ws_connected("s1", "bob") is False
+
+    def test_kick_user_unknown_user_returns_false(self):
+        manager.register_user("s1", "alice")
+        result = manager.kick_user("s1", "nonexistent")
+        assert result is False
+
+    def test_kick_user_unknown_session_returns_false(self):
+        result = manager.kick_user("nonexistent", "bob")
+        assert result is False
+
+    def test_kick_user_removes_empty_ws_map(self):
+        manager.register_user("s1", "alice")
+        manager.register_user("s1", "bob")
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        manager.register_ws_connection("s1", "bob", MagicMock())
+        manager.kick_user("s1", "alice")
+        manager.kick_user("s1", "bob")
+        assert "s1" not in manager.ws_username_map
+
+
+class TestWebSocketKick:
+    @pytest.mark.asyncio
+    async def test_kick_user_by_initiator(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+        manager.register_user("test-session", "bob")
+        manager.register_ws_connection("test-session", "alice", SimpleMockWs())
+        manager.register_ws_connection("test-session", "bob", SimpleMockWs())
+
+        ws.receive_text.side_effect = [
+            '{"type": "join", "username": "alice"}',
+            '{"type": "kick_user", "username": "alice", "target_username": "bob"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+        assert "bob" not in manager.session_users.get("test-session", {})
+
+    @pytest.mark.asyncio
+    async def test_kick_user_non_initiator_rejected(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+        manager.register_user("test-session", "bob")
+        manager.register_ws_connection("test-session", "bob", SimpleMockWs())
+
+        ws.receive_text.side_effect = [
+            '{"type": "join", "username": "bob"}',
+            '{"type": "kick_user", "username": "bob", "target_username": "alice"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+        assert "alice" in manager.session_users.get("test-session", {})
 
 
 class TestWebSocketEndpoint:
