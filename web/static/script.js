@@ -494,35 +494,36 @@ async function jiraRefreshJoinTree() {
     renderJiraJoinTree();
 }
 
-function renderJiraJoinTree() {
-    const container = document.getElementById('jiraJoinTree');
+function renderJiraTree(container, options = {}) {
+    const { onSelect, showPriority = false, prepopulateWithEpics = false, issues = jiraIssues, emptyMessage = '— нет задач —', selectedKey = null } = options;
     if (!container) return;
-
-    if (jiraIssues.length === 0) {
-        container.innerHTML = '<div class="jira-tree-empty">Нет задач. Настройте JQL-фильтр в ⚡ JIRA</div>';
+    if (issues.length === 0) {
+        container.innerHTML = '<div class="jira-tree-empty">' + escapeHtml(emptyMessage) + '</div>';
         return;
     }
 
-    // Используем глобальный epicMap из jiraLoadIssues
-    console.log('[Jira] renderJiraJoinTree - epicMap:', epicMap);
-
-    // Группируем по полю Epic Link (не требуем отдельного списка эпиков)
     const groups = {};
-    for (const issue of jiraIssues) {
+    if (prepopulateWithEpics) {
+        for (const epic of jiraEpics) {
+            groups[epic.key] = { epic, children: [] };
+        }
+    }
+    for (const issue of issues) {
         if (issue.fields?.issuetype?.name === 'Epic') continue;
         let epicKey = null;
         if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
             const epicLinkValue = issue.fields[jiraEpicLinkField];
             if (typeof epicLinkValue === 'object') {
-                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
                 epicKey = epicLinkValue.key;
             } else if (typeof epicLinkValue === 'string') {
                 epicKey = epicLinkValue.trim();
             }
         }
-        if (!epicKey) epicKey = '__no_epic__';
+        if (!epicKey || (prepopulateWithEpics && !groups[epicKey])) {
+            epicKey = '__no_epic__';
+        }
         if (!groups[epicKey]) {
-            groups[epicKey] = { children: [] };
+            groups[epicKey] = { epic: null, children: [] };
         }
         groups[epicKey].children.push(issue);
     }
@@ -537,7 +538,6 @@ function renderJiraJoinTree() {
     for (const groupKey of groupKeys) {
         const group = groups[groupKey];
         const isNoEpic = groupKey === '__no_epic__';
-        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
         const epicName = epicMap[groupKey];
         const groupLabel = isNoEpic 
             ? '📋 Без эпика' 
@@ -552,7 +552,12 @@ function renderJiraJoinTree() {
         for (const issue of group.children) {
             const key = issue.key || '';
             const summary = issue.fields?.summary || '';
-            html += `<div class="jira-tree-item" data-key="${key}" onclick="selectJoinJiraIssue(this, '${key}')">
+            const priorityIcon = showPriority && issue.fields?.priority?.iconUrl
+                ? `<img src="${issue.fields.priority.iconUrl}" class="jira-tree-priority-icon" alt="${issue.fields.priority.name}" title="${issue.fields.priority.name}">`
+                : '';
+            const selected = key === selectedKey ? ' selected' : '';
+            html += `<div class="jira-tree-item${selected}" data-key="${key}">
+                        ${priorityIcon}
                         <span class="jira-tree-item-key">${key}</span>
                         <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
                      </div>`;
@@ -561,12 +566,33 @@ function renderJiraJoinTree() {
     }
     container.innerHTML = html;
 
-    // Раскрываем первую группу
-    const firstGroup = container.querySelector('.jira-tree-group');
-    if (firstGroup) {
-        firstGroup.querySelector('.jira-tree-children').classList.add('open');
-        firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+    container.querySelectorAll('.jira-tree-item').forEach(el => {
+        el.addEventListener('click', () => {
+            if (onSelect) onSelect(el, el.dataset.key);
+        });
+    });
+
+    const selectedItem = container.querySelector('.jira-tree-item.selected');
+    if (selectedItem) {
+        const parentGroup = selectedItem.closest('.jira-tree-group');
+        if (parentGroup) {
+            parentGroup.querySelector('.jira-tree-children').classList.add('open');
+            parentGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+        }
+    } else {
+        const firstGroup = container.querySelector('.jira-tree-group');
+        if (firstGroup) {
+            firstGroup.querySelector('.jira-tree-children').classList.add('open');
+            firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
+        }
     }
+}
+
+function renderJiraJoinTree() {
+    renderJiraTree(document.getElementById('jiraJoinTree'), {
+        onSelect: (el, key) => selectJoinJiraIssue(el, key),
+        emptyMessage: 'Нет задач. Настройте JQL-фильтр в ⚡ JIRA',
+    });
 }
 
 function selectJoinJiraIssue(el, key) {
@@ -799,96 +825,15 @@ async function jiraLoadIssues() {
 
 function renderJiraIssueTree() {
     const container = document.getElementById('jiraIssueTree');
-    if (!container || jiraIssues.length === 0) {
-        if (container) {
-            container.innerHTML = '<div class="jira-tree-empty">— нет задач —</div>';
-        }
-        document.getElementById('jiraSessionActions').style.display = 'none';
-        return;
-    }
-
-    const groups = {};
-    // Не требуем отдельного списка эпиков — группируем по значению поля Epic Link
-    for (const issue of jiraIssues) {
-        if (issue.fields?.issuetype?.name === 'Epic') continue;
-        let epicKey = null;
-        if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-            const epicLinkValue = issue.fields[jiraEpicLinkField];
-            if (typeof epicLinkValue === 'object') {
-                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
-                epicKey = epicLinkValue.key;
-            } else if (typeof epicLinkValue === 'string') {
-                epicKey = epicLinkValue.trim();
-            }
-        }
-        if (!epicKey) {
-            epicKey = '__no_epic__';
-        }
-        if (!groups[epicKey]) {
-            groups[epicKey] = { children: [] };
-        }
-        groups[epicKey].children.push(issue);
-    }
-
-    // Используем глобальный epicMap
-
-    const priorityMap = { 'Highest': 0, 'High': 1, 'Medium': 2, 'Low': 3, 'Lowest': 4 };
-    function priorityOrder(name) { return priorityMap[name] ?? 3; }
-
-    const groupKeys = Object.keys(groups).sort((a, b) => {
-        if (a === '__no_epic__') return 1;
-        if (b === '__no_epic__') return -1;
-        return 0;
+    if (!container) return;
+    document.getElementById('jiraSessionActions').style.display = jiraIssues.length > 0 ? 'block' : 'none';
+    renderJiraTree(container, {
+        onSelect: (el, key) => selectJiraTreeIssue(el, key),
+        showPriority: true,
+        selectedKey: jiraSelectedIssue,
+        emptyMessage: '— нет задач —',
     });
-
-    let html = '';
-    for (const groupKey of groupKeys) {
-        const group = groups[groupKey];
-        const isNoEpic = groupKey === '__no_epic__';
-        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
-        const epicName = epicMap[groupKey];
-        const groupLabel = isNoEpic 
-            ? '📋 Без эпика' 
-            : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
-        html += `<div class="jira-tree-group">`;
-        html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
-                    <span class="jira-tree-toggle">▶</span>
-                    <span class="jira-tree-epic-label">${groupLabel}</span>
-                    <span class="jira-tree-count">${group.children.length}</span>
-                 </div>`;
-        html += `<div class="jira-tree-children">`;
-        for (const issue of group.children) {
-            const key = issue.key || '';
-            const summary = issue.fields?.summary || '';
-            const priorityIcon = issue.fields?.priority?.iconUrl
-                ? `<img src="${issue.fields.priority.iconUrl}" class="jira-tree-priority-icon" alt="${issue.fields.priority.name}" title="${issue.fields.priority.name}">`
-                : '';
-            const selected = key === jiraSelectedIssue ? ' selected' : '';
-            html += `<div class="jira-tree-item${selected}" data-key="${key}" onclick="selectJiraTreeIssue(this, '${key}')">
-                        ${priorityIcon}
-                        <span class="jira-tree-item-key">${key}</span>
-                        <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
-                     </div>`;
-        }
-
-        html += `</div></div>`;
-    }
-
-    container.innerHTML = html;
-
-    const firstSelected = container.querySelector('.jira-tree-item.selected');
-    if (firstSelected) {
-        const parentGroup = firstSelected.closest('.jira-tree-group');
-        if (parentGroup) {
-            parentGroup.querySelector('.jira-tree-children').classList.add('open');
-            parentGroup.querySelector('.jira-tree-toggle').textContent = '▼';
-        }
-    } else {
-        const firstGroup = container.querySelector('.jira-tree-group');
-        if (firstGroup) {
-            firstGroup.querySelector('.jira-tree-children').classList.add('open');
-            firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
-        }
+    if (!jiraSelectedIssue || !jiraIssues.find(i => i.key === jiraSelectedIssue)) {
         const firstItem = container.querySelector('.jira-tree-item');
         if (firstItem) {
             selectJiraTreeIssue(firstItem, firstItem.dataset.key);
@@ -1183,70 +1128,10 @@ function openNewTaskModal() {
         const treeContainer = document.getElementById('newTaskTree');
         if (!treeContainer) return;
 
-        if (jiraIssues.length === 0) {
-            treeContainer.innerHTML = '<div class="jira-tree-empty">Нет задач. Нажмите 🔄 ОБНОВИТЬ</div>';
-            return;
-        }
-
-        // Используем epicMap из jiraLoadIssues
-        const groups = {};
-        for (const issue of jiraIssues) {
-            if (issue.fields?.issuetype?.name === 'Epic') continue;
-            let epicKey = null;
-            if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-                const epicLinkValue = issue.fields[jiraEpicLinkField];
-                if (typeof epicLinkValue === 'object') {
-                    epicKey = epicLinkValue.key;
-                } else if (typeof epicLinkValue === 'string') {
-                    epicKey = epicLinkValue.trim();
-                }
-            }
-            if (!epicKey) epicKey = '__no_epic__';
-            if (!groups[epicKey]) {
-                groups[epicKey] = { children: [] };
-            }
-            groups[epicKey].children.push(issue);
-        }
-
-        const groupKeys = Object.keys(groups).sort((a, b) => {
-            if (a === '__no_epic__') return 1;
-            if (b === '__no_epic__') return -1;
-            return 0;
+        renderJiraTree(treeContainer, {
+            onSelect: (el, key) => selectNewTaskTreeItem(el, key),
+            emptyMessage: 'Нет задач. Нажмите 🔄 ОБНОВИТЬ',
         });
-
-        let html = '';
-        for (const groupKey of groupKeys) {
-            const group = groups[groupKey];
-            const isNoEpic = groupKey === '__no_epic__';
-            const epicName = epicMap[groupKey];
-            const groupLabel = isNoEpic 
-                ? '📋 Без эпика' 
-                : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
-            html += `<div class="jira-tree-group">`;
-            html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
-                        <span class="jira-tree-toggle">▶</span>
-                        <span class="jira-tree-epic-label">${groupLabel}</span>
-                        <span class="jira-tree-count">${group.children.length}</span>
-                     </div>`;
-            html += `<div class="jira-tree-children">`;
-            for (const issue of group.children) {
-                const key = issue.key || '';
-                const summary = issue.fields?.summary || '';
-                html += `<div class="jira-tree-item" data-key="${key}" onclick="selectNewTaskTreeItem(this, '${key}')">
-                            <span class="jira-tree-item-key">${key}</span>
-                            <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
-                         </div>`;
-            }
-            html += `</div></div>`;
-        }
-        treeContainer.innerHTML = html;
-
-        // Раскрываем первую группу
-        const firstGroup = treeContainer.querySelector('.jira-tree-group');
-        if (firstGroup) {
-            firstGroup.querySelector('.jira-tree-children').classList.add('open');
-            firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
-        }
 
         // При клике на элемент
         treeContainer.querySelectorAll('.jira-tree-item').forEach(el => {
@@ -1338,84 +1223,11 @@ async function applyNewTaskFromModal() {
 }
 
 function renderJiraTreeInContainer(container, onSelect) {
-    if (!container) return;
-    if (jiraIssues.length === 0) {
-        container.innerHTML = '<div class="jira-tree-empty">— нет задач —</div>';
-        return;
-    }
-
-    // Используем глобальный epicMap
-    console.log('[Jira] renderJiraTreeInContainer - epicMap:', epicMap);
-
-    const groups = {};
-    for (const epic of jiraEpics) {
-        groups[epic.key] = { epic, children: [] };
-    }
-    for (const issue of jiraIssues) {
-        if (issue.fields?.issuetype?.name === 'Epic') continue;
-        let epicKey = null;
-        if (jiraEpicLinkField && issue.fields?.[jiraEpicLinkField]) {
-            const epicLinkValue = issue.fields[jiraEpicLinkField];
-            if (typeof epicLinkValue === 'object') {
-                // Jira возвращает объект { key: "PROJ-123", name: "Имя эпика" }
-                epicKey = epicLinkValue.key;
-            } else if (typeof epicLinkValue === 'string') {
-                epicKey = epicLinkValue.trim();
-            }
-        }
-        if (!epicKey || !groups[epicKey]) epicKey = '__no_epic__';
-        if (!groups[epicKey]) {
-            groups[epicKey] = { epic: null, children: [] };
-        }
-        groups[epicKey].children.push(issue);
-    }
-
-    const groupKeys = Object.keys(groups).sort((a, b) => {
-        if (a === '__no_epic__') return 1;
-        if (b === '__no_epic__') return -1;
-        return 0;
+    renderJiraTree(container, {
+        onSelect: (el, key) => selectNewTaskTreeItem(el, key),
+        showPriority: true,
+        prepopulateWithEpics: true,
     });
-
-    let html = '';
-    for (const groupKey of groupKeys) {
-        const group = groups[groupKey];
-        const isNoEpic = groupKey === '__no_epic__';
-        // Используем имя эпика из jiraEpics (summary), если не найдено — показываем только ключ
-        const epicName = epicMap[groupKey];
-        const groupLabel = isNoEpic 
-            ? '📋 Без эпика' 
-            : (epicName ? `📌 ${groupKey} — ${escapeHtml(epicName)}` : `📌 ${escapeHtml(groupKey)}`);
-        html += `<div class="jira-tree-group">`;
-        html += `<div class="jira-tree-epic" onclick="toggleJiraTreeGroup(this)">
-                    <span class="jira-tree-toggle">▶</span>
-                    <span class="jira-tree-epic-label">${groupLabel}</span>
-                    <span class="jira-tree-count">${group.children.length}</span>
-                 </div>`;
-        html += `<div class="jira-tree-children">`;
-        for (const issue of group.children) {
-            const key = issue.key || '';
-            const summary = issue.fields?.summary || '';
-            const priorityIcon = issue.fields?.priority?.iconUrl
-                ? `<img src="${issue.fields.priority.iconUrl}" class="jira-tree-priority-icon" alt="${issue.fields.priority.name}" title="${issue.fields.priority.name}">`
-                : '';
-            html += `<div class="jira-tree-item" data-key="${key}" onclick="selectNewTaskTreeItem(this, '${key}')">
-                        ${priorityIcon}
-                        <span class="jira-tree-item-key">${key}</span>
-                        <span class="jira-tree-item-summary">${escapeHtml(summary)}</span>
-                     </div>`;
-        }
-        html += `</div></div>`;
-    }
-    container.innerHTML = html;
-
-    // Раскрываем первую группу
-    const firstGroup = container.querySelector('.jira-tree-group');
-    if (firstGroup) {
-        firstGroup.querySelector('.jira-tree-children').classList.add('open');
-        firstGroup.querySelector('.jira-tree-toggle').textContent = '▼';
-    }
-
-    // При клике на элемент — вызываем onSelect
     if (onSelect) {
         container.querySelectorAll('.jira-tree-item').forEach(el => {
             el.addEventListener('dblclick', () => {
