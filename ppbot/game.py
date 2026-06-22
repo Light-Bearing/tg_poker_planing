@@ -12,6 +12,7 @@ class Initiator:
 
     Stored as a dict in SQLite for backward compatibility.
     """
+
     id: str
     first_name: str
     username: str = ""
@@ -30,6 +31,7 @@ class Initiator:
     @classmethod
     def from_dict(cls, data: dict) -> "Initiator":
         return cls(id=str(data["id"]), first_name=data.get("first_name", ""), username=data.get("username", ""))
+
 
 AVAILABLE_POINTS = [
     "1",
@@ -187,10 +189,7 @@ class Game:
         """Format a user (Initiator or dict) as a readable string."""
         if isinstance(initiator, Initiator):
             return "@{} ({})".format(initiator.username or initiator.id, initiator.first_name)
-        return "@{} ({})".format(
-            initiator.get("username") or initiator.get("id"),
-            initiator.get("first_name", "")
-        )
+        return "@{} ({})".format(initiator.get("username") or initiator.get("id"), initiator.get("first_name", ""))
 
     def to_dict(self):
         data = {
@@ -200,6 +199,7 @@ class Game:
             "revealed": self.revealed,
             "scale_name": self.scale_name,
             "custom_points": self.custom_points,
+            "auto_reveal": self.auto_reveal,
             "votes": {user_id: vote.to_dict() for user_id, vote in self.votes.items()},
         }
 
@@ -228,6 +228,7 @@ class Game:
             dct["text"],
             scale_name=dct.get("scale_name"),
             custom_points=dct.get("custom_points", []),
+            auto_reveal=dct.get("auto_reveal", False),
         )
         for user_id, vote in dct["votes"].items():
             res.votes[user_id] = Vote.from_dict(vote)
