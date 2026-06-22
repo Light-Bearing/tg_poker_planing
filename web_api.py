@@ -7,7 +7,7 @@ from starlette.responses import JSONResponse
 import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
-from ppbot.game import AVAILABLE_POINTS, DEFAULT_SCALE, SCALE_NAMES, SCALES, Game
+from ppbot.game import AVAILABLE_POINTS, DEFAULT_SCALE, SCALE_NAMES, SCALES, Game, Initiator
 
 
 def game_to_web_response(game: Game, session_id: str) -> dict:
@@ -25,9 +25,9 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
     return {
         "session_id": session_id,
         "text": game.text,
-        "initiator": game.initiator.get("username") or str(game.initiator.get("id")),
-        "initiator_name": game.initiator.get("first_name", "Unknown"),
-        "initiator_id": game.initiator.get("id"),
+        "initiator": game.initiator.username or game.initiator.id,
+        "initiator_name": game.initiator.first_name or "Unknown",
+        "initiator_id": game.initiator.id,
         "revealed": game.revealed,
         "votes": votes,
         "vote_count": len(game.votes),
@@ -90,7 +90,7 @@ async def api_create_session(request: Request):
             return JSONResponse({"error": "Task description is required"}, status_code=400)
 
         session_id = str(uuid.uuid4())[:8]
-        initiator = {"id": f"web_{username}", "first_name": username, "username": username}
+        initiator = Initiator.from_web(username)
         scale_name = data.get("scale_name", "").strip() or None
         auto_reveal = data.get("auto_reveal", False)  # Новая настройка
 
@@ -128,7 +128,7 @@ async def api_set_scale(request: Request):
             return JSONResponse({"error": "Session not found"}, status_code=404)
 
         # Только инициатор может менять шкалу
-        if f"web_{username}" != game.initiator.get("id"):
+        if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can change scale"}, status_code=403)
 
         game.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
@@ -214,7 +214,7 @@ async def api_restart(request: Request):
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
-        if f"web_{username}" != game.initiator["id"]:
+        if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can restart"}, status_code=403)
 
         if new_text:
@@ -238,7 +238,7 @@ async def api_reveal(request: Request):
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
-        if f"web_{username}" != game.initiator["id"]:
+        if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can reveal cards"}, status_code=403)
 
         game.revealed = True
@@ -263,7 +263,7 @@ async def api_kick_user(request: Request):
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
 
-        if f"web_{username}" != game.initiator.get("id"):
+        if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can kick users"}, status_code=403)
 
         if target_username == username:

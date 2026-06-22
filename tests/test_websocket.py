@@ -297,7 +297,7 @@ class TestTransferInitiator:
         await transfer_initiator_if_needed("s4", "alice")
         # Initiator should remain unchanged
         updated = await state.storage.get_game("web", "s4")
-        assert updated.initiator["id"] == "web_alice"
+        assert updated.initiator.id == "web_alice"
 
     @pytest.mark.asyncio
     async def test_transfers_to_next_user(self):
@@ -310,7 +310,7 @@ class TestTransferInitiator:
         with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
             await transfer_initiator_if_needed("s1", "alice")
             updated = await state.storage.get_game("web", "s1")
-            assert updated.initiator["id"] == "web_bob"
+            assert updated.initiator.id == "web_bob"
             mock_broadcast.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -322,7 +322,7 @@ class TestTransferInitiator:
         manager.register_user("s2", "bob")
         await transfer_initiator_if_needed("s2", "bob")
         updated = await state.storage.get_game("web", "s2")
-        assert updated.initiator["id"] == "web_alice"
+        assert updated.initiator.id == "web_alice"
 
     @pytest.mark.asyncio
     async def test_does_not_transfer_when_no_other_users(self):
@@ -333,7 +333,7 @@ class TestTransferInitiator:
         manager.register_user("s3", "alice")
         await transfer_initiator_if_needed("s3", "alice")
         updated = await state.storage.get_game("web", "s3")
-        assert updated.initiator["id"] == "web_alice"
+        assert updated.initiator.id == "web_alice"
 
     @pytest.mark.asyncio
     async def test_no_game_found(self):
@@ -353,7 +353,7 @@ class TestTransferInitiator:
         with patch("connection.manager.broadcast", new=AsyncMock()) as mock_broadcast:
             await transfer_initiator_if_needed("s5", "alice")
             updated = await state.storage.get_game("web", "s5")
-            assert updated.initiator["id"] == "web_bob"
+            assert updated.initiator.id == "web_bob"
             mock_broadcast.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -369,7 +369,7 @@ class TestTransferInitiator:
         with patch("connection.manager.broadcast", new=AsyncMock()):
             await transfer_initiator_if_needed("s6", "alice")
             updated = await state.storage.get_game("web", "s6")
-            assert updated.initiator["id"] == "web_alice"  # unchanged
+            assert updated.initiator.id == "web_alice"  # unchanged
 
 
 class TestKick:
@@ -568,4 +568,4 @@ class TestWebSocketEndpoint:
         await websocket_endpoint(alice_ws)
 
         updated = await state.storage.get_game("web", "test-session")
-        assert updated.initiator["id"] == "web_bob"
+        assert updated.initiator.id == "web_bob"

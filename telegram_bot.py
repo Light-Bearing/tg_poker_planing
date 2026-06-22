@@ -5,7 +5,7 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 
 import state
 from config import DB_PATH, GREETING, PROXY_URL, TOKEN, logger
-from ppbot.game import DEFAULT_SCALE, SCALES, Game
+from ppbot.game import DEFAULT_SCALE, SCALES, Game, Initiator
 
 
 async def init_bot():
@@ -39,11 +39,7 @@ async def poker_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         chat_id = update.effective_chat.id
         message_id = str(update.message.message_id)
-        initiator = {
-            "id": update.effective_user.id,
-            "first_name": update.effective_user.first_name,
-            "username": update.effective_user.username,
-        }
+        initiator = Initiator.from_telegram_user(update.effective_user)
         raw_args = list(context.args or [])
         scale_name, text_args = _parse_scale_from_args(raw_args)
         text = " ".join(text_args) if text_args else "No description provided"
@@ -71,8 +67,7 @@ async def handle_scale_click(query, data, chat_id):
         return await query.answer("Game not found", show_alert=True)
 
     # Только инициатор может менять шкалу
-    initiator_id = game.initiator.get("id")
-    if str(query.from_user.id) != str(initiator_id):
+    if str(query.from_user.id) != str(game.initiator.id):
         return await query.answer("Only initiator can change scale", show_alert=True)
 
     # Advance to the next scale in the list
@@ -83,7 +78,7 @@ async def handle_scale_click(query, data, chat_id):
 
     # If switching to custom scale, load saved custom points
     if game.scale_name == "custom":
-        initiator_key = str(game.initiator.get("id", ""))
+        initiator_key = game.initiator.id
         if initiator_key:
             saved_points = await state.storage.get_custom_scale(initiator_key)
             if saved_points:
@@ -148,7 +143,7 @@ async def handle_operation_click(query, data, chat_id):
     game = await state.storage.get_game(chat_id, vote_id)
     if not game:
         return await query.answer("Game not found", show_alert=True)
-    if query.from_user.id != game.initiator["id"]:
+    if str(query.from_user.id) != str(game.initiator.id):
         return await query.answer(f"{operation} is available only for initiator", show_alert=True)
 
     if operation in (Game.OP_RESTART, Game.OP_RESTART_NEW):
