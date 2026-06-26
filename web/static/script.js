@@ -2274,10 +2274,7 @@ function updateSessionDisplay(session) {
     // Обновляем состояние чекбокса автооткрытия
     const autoRevealToggle = document.getElementById('autoRevealToggle');
     if (autoRevealToggle) {
-        const sessionAutoReveal = session.auto_reveal || false;
-        if (autoRevealToggle.checked !== sessionAutoReveal) {
-            autoRevealToggle.checked = sessionAutoReveal;
-        }
+        autoRevealToggle.checked = session.auto_reveal || false;
     }
 
     // Парсим данные задачи (JSON от Jira или старый формат [KEY] Summary)
@@ -2669,6 +2666,7 @@ let autoRevealTimer = null;
 
 function checkAutoReveal(session) {
     if (session.revealed || !state.isInitiator) return;
+    if (!session.auto_reveal) return;
     
     const totalOnline = session.participants ? session.participants.filter(p => p.online).length : 0;
     if (totalOnline <= 1) return; // только инициатор — не открываем
