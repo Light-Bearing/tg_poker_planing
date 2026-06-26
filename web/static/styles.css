@@ -478,6 +478,33 @@ code {
     margin-top: 4px;
 }
 
+/* ADF additions */
+.jira-doc { line-height: 1.6; }
+.jira-doc h1, .jira-doc h2, .jira-doc h3, .jira-doc h4 { margin: 12px 0 6px; color: var(--text-primary); font-weight: 600; }
+.jira-doc h1 { font-size: 1.2em; }
+.jira-doc h2 { font-size: 1.1em; }
+.jira-doc h3 { font-size: 1.05em; }
+.jira-doc h4 { font-size: 1em; }
+.jira-doc ul, .jira-doc ol { margin: 6px 0; padding-left: 20px; }
+.jira-doc li { margin: 2px 0; color: var(--text-primary); }
+.jira-doc blockquote {
+    margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--accent);
+    background: var(--bg-input); color: var(--text-secondary); font-style: italic;
+}
+.jira-doc hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.jira-doc table.jira-table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.jira-doc table.jira-table th,
+.jira-doc table.jira-table td {
+    border: 1px solid var(--border); padding: 6px 10px; text-align: left;
+    font-size: 0.9em;
+}
+.jira-doc table.jira-table th { background: var(--bg-input); font-weight: 600; color: var(--text-primary); }
+.jira-doc table.jira-table td { color: var(--text-primary); }
+.jira-media-placeholder { padding: 8px; background: var(--bg-input); border: 1px dashed var(--border); border-radius: 2px; margin: 8px 0; color: var(--text-secondary); font-size: 0.85em; text-align: center; }
+.jira-mention { color: var(--accent); font-weight: 600; }
+.jira-task-ref { color: var(--accent); font-weight: 500; }
+.jira-doc p { margin: 4px 0; }
+
 .session-id-copy {
     cursor: pointer;
     color: var(--accent);
