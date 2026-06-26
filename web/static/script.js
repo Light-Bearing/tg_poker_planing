@@ -896,7 +896,7 @@ function showJiraIssuePreview(issue) {
             <a href="${url}" target="_blank" class="jira-preview-link">${key}</a>
             <span class="jira-preview-summary">${escapeHtml(summary)}</span>
         </div>
-        ${description ? `<div class="jira-preview-desc">${formatJiraDescription(description)}</div>` : ''}
+        ${description ? `<div class="jira-preview-desc">${parseJiraDescription(description)}</div>` : ''}
         ${linkedHtml}
     `;
     preview.style.display = 'block';
@@ -986,11 +986,7 @@ function formatLinkedIssues(linked, jiraBaseUrl) {
     return html;
 }
 
-function formatJiraDescription(text) {
-    if (!text) return '';
-    const escaped = escapeHtml(text).replace(/\n/g, '<br>');
-    return escaped.replace(/(https?:\/\/[^\s<"']+)/g, '<a href="$1" target="_blank" rel="noopener" class="jira-link">$1</a>');
-}
+
 
 function jiraApplyTask() {
     if (!jiraSelectedIssue) return;
@@ -1046,7 +1042,7 @@ function updateTaskDescriptionWithJira(description, linked = []) {
 
     let html = '';
     if (description) {
-        html += '<div class="task-jira-desc-text">' + formatJiraDescription(description) + '</div>';
+        html += '<div class="task-jira-desc-text">' + parseJiraDescription(description) + '</div>';
     }
     if (linked.length > 0) {
         html += '<div class="task-jira-links">' +
@@ -1765,39 +1761,7 @@ function formatTaskText(text) {
     return text.replace(urlRegex, url => `<a href="${url}" target="_blank" style="color: var(--accent); text-decoration: underline; word-break: break-all;">${url}</a>`);
 }
 
-function formatJiraDescription(desc) {
-    if (!desc) return '';
-    
-    // Экранируем HTML
-    let html = escapeHtml(desc);
-    
-    // Jira ссылки [текст|url] → <a href="url">текст</a>
-    const jiraBaseUrl = jiraSettings?.jiraUrl || '';
-    html = html.replace(/\[([^|]+?)\|([^\]\n]+?)\]/g, (_, text, url) => {
-        const href = url.match(/^https?:\/\//) ? url : (jiraBaseUrl ? `${jiraBaseUrl}${url.startsWith('/') ? '' : '/'}${url}` : url);
-        return `<a href="${href}" target="_blank" class="jira-desc-link">${text.trim()}</a>`;
-    });
-    
-    // Jira ссылки на задачи [PROJ-123]
-    if (jiraBaseUrl) {
-        html = html.replace(/\[([A-Z]{2,6}-\d+)\]/g, (_, key) =>
-            `<a href="${jiraBaseUrl}/browse/${key}" target="_blank" class="jira-desc-link">${key}</a>`
-        );
-        html = html.replace(/\b([A-Z]{2,6}-\d+)\b/g, (_, key) =>
-            `<a href="${jiraBaseUrl}/browse/${key}" target="_blank" class="jira-desc-link">${key}</a>`
-        );
-    }
-    
-    // Обычные URL — только если не внутри href="..." (проверяем контекст)
-    html = html.replace(/(^|[\s(\[,;:>!?])(https?:\/\/[^\s<>\])"]+)/g, (_, before, url) =>
-        `${before}<a href="${url}" target="_blank" class="jira-desc-link">${url}</a>`
-    );
-    
-    // Переносы строк
-    html = html.replace(/\n/g, '<br>');
-    
-    return html;
-}
+
 
 function updateTaskDisplay() {
     const taskDisplay = document.getElementById('taskDisplay');
@@ -1834,7 +1798,7 @@ function updateTaskDisplay() {
         const taskHtml = `
             <div style="flex: 1; overflow-y: auto; min-height: 0; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--border) transparent;">
                 ${summary ? `<div style="font-weight: 500; margin-bottom: ${description ? '6px' : '0'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-size: 0.95em;">${escapeHtml(summary)}</div>` : ''}
-                ${description ? `<div class="jira-description" style="color: var(--text-primary); font-size: 0.95em;">${formatJiraDescription(description)}</div>` : ''}
+                ${description ? `<div class="jira-description" style="color: var(--text-primary); font-size: 0.95em;">${parseJiraDescription(description)}</div>` : ''}
             </div>
             ${linkedHtml}
         `;
