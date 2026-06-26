@@ -28,7 +28,7 @@
                     break;
                 }
                 case 'link': {
-                    const href = mark.attrs?.href || '#';
+                    const href = escapeHtml(mark.attrs?.href || '#');
                     result = `<a href="${href}" target="_blank" class="jira-desc-link">${result}</a>`;
                     break;
                 }
@@ -126,7 +126,7 @@
 
             case 'inlineCard': {
                 const url = attrs?.url || '';
-                return url ? `<a href="${url}" target="_blank" class="jira-desc-link">${escapeHtml(url)}</a>` : '';
+                return url ? `<a href="${escapeHtml(url)}" target="_blank" class="jira-desc-link">${escapeHtml(url)}</a>` : '';
             }
 
             case 'emoji': {
@@ -180,7 +180,7 @@
         });
 
         html = html.replace(/^(\s*)[*-]\s+(.*)$/gm, (_, spaces, item) => `<li>${item}</li>`);
-        html = html.replace(/((?:<li>.*?<\/li>\n?)+)/g, '<ul>$1</ul>');
+        html = html.replace(/(?:^|\n)((?:<li>.*?<\/li>(?:\n|$))+)/g, '\n<ul>$1</ul>\n');
 
         html = html.replace(/\{\{(.+?)\}\}/g, '<code>$1</code>');
         html = html.replace(/-([\S\x20]+?)-/g, (match, text) => {
@@ -195,14 +195,14 @@
 
         html = html.replace(/\[([^|]+?)\|([^\]\n]+?)\]/g, (_, text, url) => {
             const href = url.match(/^https?:\/\//) ? url : `https://${url}`;
-            return `<a href="${href}" target="_blank" class="jira-desc-link">${text.trim()}</a>`;
+            return `<a href="${escapeHtml(href)}" target="_blank" class="jira-desc-link">${text.trim()}</a>`;
         });
 
         html = html.replace(/\[([A-Z]{2,6}-\d+)\]/g, '<span class="jira-task-ref">$1</span>');
         html = html.replace(/\b([A-Z]{2,6}-\d+)\b/g, '<span class="jira-task-ref">$1</span>');
 
         html = html.replace(/(^|[\s(\[,;:>!?])(https?:\/\/[^\s<>\])"]+)/g, (_, before, url) =>
-            `${before}<a href="${url}" target="_blank" class="jira-desc-link">${url}</a>`
+            `${before}<a href="${escapeHtml(url)}" target="_blank" class="jira-desc-link">${url}</a>`
         );
 
         html = html.replace(/\n/g, '<br>');
