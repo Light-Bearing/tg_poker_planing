@@ -410,7 +410,15 @@ async def download_extension(request: Request):
         except FileNotFoundError:
             return HTMLResponse("<h1>Файл инструкции не найден</h1>")
 
-    # Если ?download=true или просто клик с атрибутом download — прямая загрузка ZIP
-    # Скачиваем универсальный архив со всеми файлами и инструкциями
-    zip_path = "browser-extension/pp-jira-bridge-all.zip"
+    # Прямая загрузка ZIP — детект браузера по User-Agent
+    user_agent = request.headers.get("user-agent", "").lower()
+
+    if "firefox" in user_agent:
+        zip_path = "browser-extension/pp-jira-bridge-firefox.zip"
+    elif "edg" in user_agent:
+        zip_path = "browser-extension/pp-jira-bridge-chrome.zip"
+    else:
+        # Chrome, Chromium, Safari, Opera, etc.
+        zip_path = "browser-extension/pp-jira-bridge-chrome.zip"
+
     return FileResponse(zip_path, media_type="application/zip", filename="pp-jira-bridge.zip")
