@@ -25,7 +25,8 @@ echo "✅ Chrome build: pp-jira-bridge-chrome.zip"
 echo "📦 Building Firefox version..."
 rm -rf build-firefox
 mkdir -p build-firefox
-cp manifest-firefox.json browser-polyfill.min.js background.js content.js popup.html popup.js README.md build-firefox/
+cp manifest-firefox.json build-firefox/manifest.json
+cp browser-polyfill.min.js background.js content.js popup.html popup.js README.md build-firefox/
 cp -r icons build-firefox/
 cd build-firefox
 zip -r ../pp-jira-bridge-firefox.zip . -x "*.git*" -x "build-chrome/*" -x "build-firefox/*"
