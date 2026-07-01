@@ -505,6 +505,21 @@ code {
 .jira-task-ref { color: var(--accent); font-weight: 500; }
 .jira-doc p { margin: 4px 0; }
 
+/* Jira panels (info, note, warning, success, error) */
+.jira-panel {
+    margin: 10px 0; padding: 10px 14px; border-radius: 4px;
+    border-left: 4px solid; display: flex; align-items: flex-start; gap: 8px;
+    font-size: 0.95em; line-height: 1.5;
+}
+.jira-panel-icon { flex-shrink: 0; font-size: 1.1em; line-height: 1.4; }
+.jira-panel-content { flex: 1; min-width: 0; }
+.jira-panel-info { background: rgba(0, 180, 216, 0.08); border-color: var(--accent); }
+.jira-panel-note { background: rgba(255, 209, 102, 0.08); border-color: var(--warning); }
+.jira-panel-warning { background: rgba(239, 71, 111, 0.08); border-color: var(--danger); }
+.jira-panel-success { background: rgba(6, 214, 160, 0.08); border-color: var(--success); }
+.jira-panel-error { background: rgba(239, 71, 111, 0.12); border-color: var(--danger); }
+.jira-panel-title { font-weight: 600; margin-bottom: 4px; font-size: 0.95em; }
+
 .session-id-copy {
     cursor: pointer;
     color: var(--accent);

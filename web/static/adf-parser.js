@@ -96,6 +96,13 @@
             case 'blockquote':
                 return `<blockquote>${innerHtml}</blockquote>`;
 
+            case 'panel': {
+                const panelType = attrs.panelType || 'info';
+                const panelIcons = { info: 'ℹ️', note: '📝', warning: '⚠️', success: '✅', error: '❌' };
+                const icon = panelIcons[panelType] || 'ℹ️';
+                return `<div class="jira-panel jira-panel-${panelType}"><span class="jira-panel-icon">${icon}</span><span class="jira-panel-content">${innerHtml}</span></div>`;
+            }
+
             case 'rule':
                 return `<hr>`;
 
@@ -159,6 +166,18 @@
         html = html.replace(/\{noformat\}([\s\S]*?)\{noformat\}/g, '<pre class="jira-code"><code>$1</code></pre>');
 
         html = html.replace(/\{quote\}([\s\S]*?)\{quote\}/g, '<blockquote>$1</blockquote>');
+
+        // {color:red}text{color} — цветной текст
+        html = html.replace(/\{color(?::([^}]+))?\}([\s\S]*?)\{color\}/g, (_, color, content) => {
+            const col = color ? color.trim() : 'inherit';
+            return `<span style="color:${col}">${content}</span>`;
+        });
+
+        // {panel}text{panel} или {panel:title=X}text{panel} — информационные панели
+        html = html.replace(/\{panel(?::title=([^}]+))?\}([\s\S]*?)\{panel\}/g, (_, title, content) => {
+            const titleHtml = title ? `<div class="jira-panel-title">${title.trim()}</div>` : '';
+            return `<div class="jira-panel jira-panel-info">${titleHtml}<div class="jira-panel-content">${content.trim()}</div></div>`;
+        });
 
         html = html.replace(/^h([1-6])\.\s+(.*)$/gm, (_, level, title) => `<h${level}>${title}</h${level}>`);
 
