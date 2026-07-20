@@ -2,6 +2,18 @@
 // MODULE 1: GAME CORE — State, Session, WebSocket, Voting, Task Display
 // ========================================================================
 
+// ========== CONSTANTS ==========
+const RECONNECT_MAX_ATTEMPTS = 5;
+const PING_INTERVAL_MS = 15000;
+const JIRA_AUTO_CONNECT_TIMEOUT = 30000;
+const JIRA_AUTO_CONNECT_DELAY = 2000;
+const AUTO_RESTORE_FOCUS_DELAY = 50;
+const RECONNECT_BASE_DELAY = 2000;
+const MAX_RECENT_ROOMS = 5;
+const MAX_TOASTS_ON_SCREEN = 4;
+const TOAST_DURATION_DEFAULT = 4000;
+const TOAST_DURATION_ERROR = 5000;
+
 let state = {
     username: localStorage.getItem('pp_username') || '',
     sessionId: null,
@@ -45,7 +57,7 @@ class ToastManager {
         
         // Ограничиваем количество toast'ов на экране
         const toasts = this.container.querySelectorAll('.toast');
-        if (toasts.length > 4) {
+        if (toasts.length > MAX_TOASTS_ON_SCREEN) {
             toasts[0].remove();
         }
         
@@ -134,10 +146,10 @@ document.addEventListener('pp-jira-ready', () => {
     // Даём service worker'у расширения время на инициализацию
     setTimeout(() => {
         if (typeof jiraAutoConnect === 'function' && !jiraConnected && !jiraAutoConnecting) {
-            console.log('Jira: starting auto-connect (delayed 2s after pp-jira-ready)');
-            jiraAutoConnect();
-        }
-    }, 2000);
+console.log('Jira: starting auto-connect (delayed after pp-jira-ready)');
+                    jiraAutoConnect();
+                }
+            }, JIRA_AUTO_CONNECT_DELAY);
 });
 
 // Слушаем ответы от расширения
@@ -384,7 +396,7 @@ async function jiraAutoConnect() {
         updateJiraHeaderBtn();
         const panel = document.getElementById('jiraPanel');
         if (panel && !panel.classList.contains('hidden')) renderJiraPanel();
-    }, 30000);
+    }, JIRA_AUTO_CONNECT_TIMEOUT);
 
     try {
         // Восстанавливаем epicLinkField из сохранённых настроек
@@ -1263,7 +1275,6 @@ function closeConfirmModal(result) {
 let SERVER_SCALE_NAMES = {};       // populated from server: {custom: "Custom", fibonacci: "Fibonacci", ...}
 let CURRENT_SCALE_NAME = localStorage.getItem('pp_last_scale') || "custom";  // current scale for this session
 const SPECIAL_POINTS = ["❔", "☕"];
-const MAX_RECENT_ROOMS = 5;
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -1757,8 +1768,14 @@ function updateJoinButtonText() {
 
 function formatTaskText(text) {
     if (!text) return '';
-    const urlRegex = /(https?:\/\/[^\s<]+)/g;
-    return text.replace(urlRegex, url => `<a href="${url}" target="_blank" style="color: var(--accent); text-decoration: underline; word-break: break-all;">${url}</a>`);
+    // Сначала экранируем весь текст от HTML
+    let html = escapeHtml(text);
+    // Потом заменяем URL на ссылки (в безопасном HTML)
+    const urlRegex = /(https?:\/\/[^\s<>"']+)/g;
+    html = html.replace(urlRegex, url =>
+        `<a href="${url}" target="_blank" class="jira-desc-link" style="word-break: break-all;">${url}</a>`
+    );
+    return html;
 }
 
 
@@ -1901,10 +1918,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Автоподключение с задержкой (даём service worker'у инициализироваться)
                 setTimeout(() => {
                     if (!jiraConnected && !jiraAutoConnecting) {
-                        console.log('Jira: starting auto-connect (delayed 2s after DOMContentLoaded)');
+                        console.log('Jira: starting auto-connect (delayed after DOMContentLoaded)');
                         jiraAutoConnect();
                     }
-                }, 2000);
+                }, JIRA_AUTO_CONNECT_DELAY);
             } else {
                 showJiraJoinTree();
             }
@@ -2148,7 +2165,7 @@ function connectWebSocket(sessionId) {
             if (state.ws && state.ws.readyState === WebSocket.OPEN) {
                 state.ws.send('ping');
             }
-        }, 15000); // Уменьшили интервал до 15 секунд
+        }, PING_INTERVAL_MS);
         
         // Дополнительный heartbeat при возвращении на вкладку
         document.addEventListener('visibilitychange', () => {
@@ -2206,9 +2223,9 @@ function connectWebSocket(sessionId) {
         updateConnectionStatus('disconnected');
         clearInterval(state.pingInterval);
         // Автоматическое переподключение с экспоненциальной задержкой
-        if (state.sessionId && state.reconnectAttempts < 5) {
+        if (state.sessionId && state.reconnectAttempts < RECONNECT_MAX_ATTEMPTS) {
             state.reconnectAttempts++;
-            const delay = 2000 * state.reconnectAttempts;
+            const delay = RECONNECT_BASE_DELAY * state.reconnectAttempts;
             console.log(`🔄 Переподключение через ${delay}мс (попытка ${state.reconnectAttempts})`);
             setTimeout(() => { 
                 if (state.sessionId) {
@@ -2234,11 +2251,18 @@ function setScale(scaleName) {
 function toggleAutoReveal() {
     const checkbox = document.getElementById('autoRevealToggle');
     const autoReveal = checkbox.checked;
+    // Берём username из state, localStorage или поля ввода (fallback chain)
+    const username = state.username || localStorage.getItem('pp_username') || document.getElementById('username')?.value?.trim() || '';
+    if (!username) {
+        toast.error('Идентификатор пользователя не найден', 'ОШИБКА');
+        checkbox.checked = !autoReveal;
+        return;
+    }
     
     fetch(`/api/sessions/${state.sessionId}/auto-reveal`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ auto_reveal: autoReveal })
+        body: JSON.stringify({ auto_reveal: autoReveal, username })
     })
     .then(response => response.json())
     .then(data => {
@@ -2416,8 +2440,6 @@ function updateSessionDisplay(session) {
     const votingSection = document.getElementById('votingSection');
     votingSection.style.opacity = session.revealed ? '0.4' : '1';
     votingSection.style.pointerEvents = session.revealed ? 'none' : 'auto';
-    
-    checkAutoReveal(session);
 }
 
 function renderParticipants(session) {
@@ -2661,30 +2683,9 @@ async function restartSession(newText = null) {
     }
 }
 
-// ==================== AUTO-REVEAL ====================
-let autoRevealTimer = null;
-
-function checkAutoReveal(session) {
-    if (session.revealed || !state.isInitiator) return;
-    if (!session.auto_reveal) return;
-    
-    const totalOnline = session.participants ? session.participants.filter(p => p.online).length : 0;
-    if (totalOnline <= 1) return; // только инициатор — не открываем
-    
-    if (session.vote_count >= totalOnline) {
-        if (autoRevealTimer) return; // уже запущен таймер
-        autoRevealTimer = setTimeout(() => {
-            autoRevealTimer = null;
-            revealCards();
-            toast.info('Все проголосовали — карты открыты', 'AUTO');
-        }, 1000);
-    } else {
-        if (autoRevealTimer) {
-            clearTimeout(autoRevealTimer);
-            autoRevealTimer = null;
-        }
-    }
-}
+// ==================== AUTO-REVEAL (клиент больше не инициирует — только реагирует на сервер) ====================
+// Сервер автоматически открывает карты при полном наборе голосов,
+// клиент получает update через WebSocket и обновляет отображение.
 
 async function kickParticipant(targetUsername) {
     const confirmed = await confirmDialog.show(

@@ -1,4 +1,5 @@
 import json
+from contextlib import suppress
 
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -17,6 +18,12 @@ async def check_auto_reveal(session_id: str, game):
     # Проверяем включено ли автооткрытие
     if not getattr(game, "auto_reveal", False):
         return
+
+    # Перепроверяем из БД — могло уже открыться в другом запросе
+    fresh_game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+    if fresh_game is None or fresh_game.revealed:
+        return
+    game.revealed = fresh_game.revealed  # синхронизируем
 
     # Получаем участников сессии
     participants = manager.session_users.get(session_id, {})
@@ -163,32 +170,19 @@ async def websocket_endpoint(websocket: WebSocket):
                                 # Send "kicked" message to the kicked user
                                 kicked_ws = manager.get_ws_by_username(session_id, target_username)
                                 if kicked_ws:
-                                    try:
+                                    with suppress(Exception):
                                         await kicked_ws.send_json(
                                             {
                                                 "type": "kicked",
                                                 "message": f"Вы были исключены инициатором {kicker_username}",
                                             }
                                         )
-                                    except Exception:
-                                        pass  # connection may already be dead
 
-                                # Remove the user
+                                # kick_user сам чистит все трекеры
                                 if manager.kick_user(session_id, target_username):
-                                    # Close the kicked user's WebSocket
                                     if kicked_ws:
-                                        try:
+                                        with suppress(Exception):
                                             await kicked_ws.close(1000)
-                                        except Exception:
-                                            pass
-                                    # Also remove from active_connections
-                                    if (
-                                        session_id in manager.active_connections
-                                        and kicked_ws in manager.active_connections[session_id]
-                                    ):
-                                        manager.active_connections[session_id].remove(kicked_ws)
-                                        if not manager.active_connections[session_id]:
-                                            del manager.active_connections[session_id]
 
                                     updated_data = enrich_session_response(game, session_id)
                                     await manager.broadcast(
@@ -204,9 +198,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         vote_username = msg.get("username")
                         if game and vote_username and point:
                             if point not in game.get_points():
-                                await websocket.send_json(
-                                    {"type": "error", "message": f"Point '{point}' is not in the current scale ({game.scale_name})"}
-                                )
+                                err_msg = f"Point '{point}' is not in the current scale" f" ({game.scale_name})"
+                                await websocket.send_json({"type": "error", "message": err_msg})
                             else:
                                 await process_web_vote(session_id, game, vote_username, point)
                                 await check_auto_reveal(session_id, game)

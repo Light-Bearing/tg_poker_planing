@@ -1,5 +1,6 @@
-import json
+import time
 import uuid
+from contextlib import suppress
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -8,6 +9,28 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import AVAILABLE_POINTS, DEFAULT_SCALE, SCALE_NAMES, SCALES, Game, Initiator
+
+# ========== SIMPLE RATE LIMITER ==========
+_rate_limit_store: dict[str, list[float]] = {}
+
+
+def reset_rate_limits() -> None:
+    """Сброс rate limit store (для тестов)."""
+    _rate_limit_store.clear()
+
+
+def _check_rate_limit(key: str, max_requests: int = 30, window: float = 60.0) -> bool:
+    """Проверяет rate limit: не более max_requests запросов за window секунд.
+    Возвращает True, если запрос разрешён."""
+    now = time.time()
+    timestamps = _rate_limit_store.get(key, [])
+    # Удаляем устаревшие
+    timestamps = [t for t in timestamps if now - t < window]
+    if len(timestamps) >= max_requests:
+        return False
+    timestamps.append(now)
+    _rate_limit_store[key] = timestamps
+    return True
 
 
 def game_to_web_response(game: Game, session_id: str) -> dict:
@@ -31,7 +54,7 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
         "revealed": game.revealed,
         "votes": votes,
         "vote_count": len(game.votes),
-        "average": game.to_dict().get("average", 0),
+        "average": game._calc_average(),
         "available_points": game.get_points(),
         "scale_name": game.scale_name,
         "scale_names": SCALE_NAMES,
@@ -88,6 +111,11 @@ async def api_create_session(request: Request):
             return JSONResponse({"error": "Username is required"}, status_code=400)
         if not text:
             return JSONResponse({"error": "Task description is required"}, status_code=400)
+
+        # Rate limit
+        client_ip = request.client.host if request.client else "unknown"
+        if not _check_rate_limit(f"create_session:{client_ip}", max_requests=20, window=60):
+            return JSONResponse({"error": "Too many requests. Please slow down."}, status_code=429)
 
         session_id = str(uuid.uuid4())[:8]
         initiator = Initiator.from_web(username)
@@ -190,6 +218,10 @@ async def process_web_vote(session_id: str, game, username: str, point: str):
     manager.update_user_vote(session_id, username, vote_data)
     updated_data = enrich_session_response(game, session_id)
     await manager.broadcast(session_id, {"type": "update", "data": updated_data})
+    # Проверяем условие автооткрытия (если все проголосовали и auto_reveal включён)
+    from websocket_handler import check_auto_reveal
+
+    await check_auto_reveal(session_id, game)
     return updated_data
 
 
@@ -200,6 +232,11 @@ async def api_vote(request: Request):
         username, point = data.get("username", "").strip(), data.get("point", "").strip()
         if not username or not point:
             return JSONResponse({"error": "Username and point are required"}, status_code=400)
+
+        # Rate limit
+        client_ip = request.client.host if request.client else "unknown"
+        if not _check_rate_limit(f"vote:{client_ip}", max_requests=30, window=60):
+            return JSONResponse({"error": "Too many requests. Please slow down."}, status_code=429)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
@@ -286,20 +323,16 @@ async def api_kick_user(request: Request):
         # Send "kicked" message if they have active WS
         kicked_ws = manager.get_ws_by_username(session_id, target_username)
         if kicked_ws:
-            try:
+            with suppress(Exception):
                 await kicked_ws.send_json({"type": "kicked", "message": f"Вы были исключены инициатором {username}"})
-            except Exception:
-                pass
 
         if not manager.kick_user(session_id, target_username):
             return JSONResponse({"error": "User not found in session"}, status_code=404)
 
         # Close the kicked user's WebSocket
         if kicked_ws:
-            try:
+            with suppress(Exception):
                 await kicked_ws.close(1000)
-            except Exception:
-                pass
         # Also remove from active_connections
         if session_id in manager.active_connections and kicked_ws in manager.active_connections[session_id]:
             manager.active_connections[session_id].remove(kicked_ws)
@@ -355,14 +388,17 @@ async def api_save_custom_scale(request: Request):
 
 async def api_list_sessions(request: Request):
     try:
-        async with state.storage._db.execute(
-            "SELECT game_id, json_data FROM games WHERE chat_id = ?", (WEB_CHAT_ID,)
-        ) as cursor:
-            rows = await cursor.fetchall()
-            sessions = [
-                enrich_session_response(Game.from_dict(WEB_CHAT_ID, row[0], json.loads(row[1])), row[0]) for row in rows
-            ]
-            return JSONResponse({"sessions": sessions})
+        # Пагинация: ?limit=20&offset=0
+        try:
+            limit = min(int(request.query_params.get("limit", 20)), 100)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except (ValueError, TypeError):
+            limit, offset = 20, 0
+
+        sessions_raw = await state.storage.list_all_sessions(WEB_CHAT_ID, limit=limit, offset=offset)
+        total = await state.storage.count_sessions(WEB_CHAT_ID)
+        sessions = [enrich_session_response(game, game_id) for game_id, game in sessions_raw]
+        return JSONResponse({"sessions": sessions, "total": total, "limit": limit, "offset": offset})
     except Exception as e:
         logger.error(f"Error listing sessions: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -370,6 +406,13 @@ async def api_list_sessions(request: Request):
 
 async def health(_):
     from starlette.responses import PlainTextResponse
+
+    # Проверяем что БД жива
+    try:
+        await state.storage.count_sessions(WEB_CHAT_ID)
+    except Exception as e:
+        logger.error(f"Healthcheck failed: {e}")
+        return PlainTextResponse("DB ERROR", status_code=503)
 
     return PlainTextResponse("OK")
 
@@ -388,8 +431,6 @@ async def download_extension(request: Request):
 
     # Если ?download=html — показываем страницу с инструкциями для браузера
     if download_param == "html":
-        from starlette.responses import HTMLResponse
-
         user_agent = request.headers.get("user-agent", "").lower()
 
         is_firefox = "firefox" in user_agent
@@ -404,7 +445,7 @@ async def download_extension(request: Request):
             instruction_file = "browser-extension/chrome-instruction.html"
 
         try:
-            with open(instruction_file, "r", encoding="utf-8") as f:
+            with open(instruction_file, encoding="utf-8") as f:
                 content = f.read()
             return HTMLResponse(content)
         except FileNotFoundError:

@@ -107,17 +107,18 @@ class TestShutdownEvent:
             mock_app.state.telegram_app = MagicMock()
             mock_app.state.telegram_app.stop = AsyncMock()
             mock_app.state.telegram_app.shutdown = AsyncMock()
-            with patch("app.state.storage._db", new=MagicMock()) as mock_db:
-                mock_db.close = AsyncMock()
-                with patch("asyncio.sleep", new=AsyncMock()):
-                    await shutdown_app(mock_app)
-                    mock_broadcast.assert_awaited_once_with(
-                        "s1",
-                        {
-                            "type": "shutdown",
-                            "message": "Server is shutting down",
-                        },
-                    )
+            with (
+                patch("app.state.storage.close", new=AsyncMock()),
+                patch("asyncio.sleep", new=AsyncMock()),
+            ):
+                await shutdown_app(mock_app)
+                mock_broadcast.assert_awaited_once_with(
+                    "s1",
+                    {
+                        "type": "shutdown",
+                        "message": "Server is shutting down",
+                    },
+                )
 
     @pytest.mark.asyncio
     async def test_shutdown_no_telegram_app(self):
@@ -125,9 +126,11 @@ class TestShutdownEvent:
 
         mock_app = MagicMock()
         mock_app.state.telegram_app = None
-        with patch("app.state.storage._db", new=None):
-            with patch("asyncio.sleep", new=AsyncMock()):
-                await shutdown_app(mock_app)
+        with (
+            patch("app.state.storage.close", new=AsyncMock()),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            await shutdown_app(mock_app)
 
 
 class TestMainFunctions:
@@ -610,7 +613,7 @@ class TestAPIErrorHandling:
             middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
         )
         tc = TestClient(app)
-        with patch("web_api.state.storage._db.execute", side_effect=Exception("db error")):
+        with patch("web_api.state.storage.list_all_sessions", side_effect=Exception("db error")):
             resp = tc.get("/api/sessions")
             assert resp.status_code == 500
 
