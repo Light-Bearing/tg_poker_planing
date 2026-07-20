@@ -12,10 +12,12 @@ async def check_proxy_connection(proxy_url: str) -> bool:
     try:
         protocol, rest = proxy_url.split("://", 1) if "://" in proxy_url else ("socks5", proxy_url)
         host_port = rest.split("@", 1)[1] if "@" in rest else rest
-        host, port = (
-            host_port.rsplit(":", 1) if ":" in host_port else (host_port, 1080 if protocol == "socks5" else 8080)
-        )
-        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, int(port)), timeout=5.0)
+        if ":" in host_port:
+            host, port_str = host_port.rsplit(":", 1)
+        else:
+            host = host_port
+            port_str = "1080" if protocol == "socks5" else "8080"
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, int(port_str)), timeout=5.0)
         writer.close()
         await writer.wait_closed()
         return True

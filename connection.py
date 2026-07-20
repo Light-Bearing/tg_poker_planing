@@ -1,6 +1,11 @@
 import asyncio
+from contextlib import suppress
+from typing import TYPE_CHECKING, Optional
 
 from starlette.websockets import WebSocket
+
+if TYPE_CHECKING:
+    from ppbot.game import Game
 
 
 class ConnectionManager:
@@ -27,7 +32,13 @@ class ConnectionManager:
             self.session_users[session_id] = {}
         self.active_connections[session_id].append(websocket)
 
-    def disconnect(self, session_id: str, websocket: WebSocket, username: str = None, game: object = None):
+    def disconnect(
+        self,
+        session_id: str,
+        websocket: WebSocket,
+        username: str | None = None,
+        game: Optional["Game"] = None,
+    ):
         """Remove a WebSocket from the session.
 
         Does NOT remove the user from session_users — that persists for reconnection
@@ -41,10 +52,11 @@ class ConnectionManager:
         if session_id in self.ws_username_map and username:
             self.ws_username_map[session_id].discard(username)
 
-        # Notify remaining participants that this user left
+        # Notify remaining participants that this user left (с данными сессии)
         if username and session_id in self.active_connections:
+            enriched = self._get_enriched_data(session_id, game) if game else {"session_id": session_id}
             asyncio.create_task(
-                self.broadcast(session_id, {"type": "user_left", "username": username})
+                self.broadcast(session_id, {"type": "user_left", "username": username, "data": enriched})
             )
 
     async def broadcast(self, session_id: str, message: dict):
@@ -140,10 +152,8 @@ class ConnectionManager:
         """
         if session_id in self.active_connections:
             for ws in self.active_connections[session_id]:
-                try:
+                with suppress(Exception):
                     await ws.close(1000)
-                except Exception:
-                    pass
             del self.active_connections[session_id]
 
         self.session_users.pop(session_id, None)
@@ -156,8 +166,7 @@ class ConnectionManager:
         Удаляет сессии, которые не имеют активных WS-подключений.
         """
         stale_sessions = [
-            sid for sid in self.session_users
-            if sid not in self.active_connections or not self.active_connections[sid]
+            sid for sid in self.session_users if sid not in self.active_connections or not self.active_connections[sid]
         ]
 
         for sid in stale_sessions:
@@ -166,7 +175,11 @@ class ConnectionManager:
             self._ws_connections.pop(sid, None)
             self.active_connections.pop(sid, None)
 
-    def _get_enriched_data(self, session_id: str, game: object = None):
+    @staticmethod
+    @staticmethod
+    def _get_enriched_data(session_id: str, game: Optional["Game"] = None) -> dict:
+        """Возвращает обогащённые данные сессии для broadcast.
+        Если game=None — возвращает минимальный ответ."""
         if game is None:
             return {"session_id": session_id, "participants": []}
         from web_api import enrich_session_response

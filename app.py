@@ -44,8 +44,7 @@ async def shutdown_app(app: Starlette) -> None:
     if getattr(app.state, "telegram_app", None):
         await app.state.telegram_app.stop()
         await app.state.telegram_app.shutdown()
-    if state.storage._db:
-        await state.storage._db.close()
+    await state.storage.close()
     logger.info("Shutdown complete")
 
 

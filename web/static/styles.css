@@ -1809,8 +1809,8 @@ code {
     .points-grid { grid-template-columns: repeat(3, 1fr); } 
 }
 
-/* ========== JIRA PANEL ========== */
-.jira-panel {
+/* ========== JIRA SIDE PANEL ========== */
+.jira-side-panel {
     position: fixed;
     top: 0;
     right: 0;
@@ -1826,7 +1826,7 @@ code {
     animation: jiraSlideIn 0.25s ease-out;
 }
 
-.jira-panel.hidden {
+.jira-side-panel.hidden {
     display: none;
 }
 
@@ -1835,7 +1835,7 @@ code {
     to { transform: translateX(0); }
 }
 
-.jira-panel-header {
+.jira-side-panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1844,7 +1844,7 @@ code {
     flex-shrink: 0;
 }
 
-.jira-panel-title {
+.jira-side-panel-title {
     font-family: var(--font-header);
     font-size: 0.85em;
     font-weight: 700;
@@ -1852,7 +1852,7 @@ code {
     color: var(--accent);
 }
 
-.jira-panel-close {
+.jira-side-panel-close {
     background: transparent;
     border: 1px solid var(--border);
     color: var(--text-secondary);
@@ -1867,13 +1867,13 @@ code {
     transition: all 0.2s;
 }
 
-.jira-panel-close:hover {
+.jira-side-panel-close:hover {
     border-color: var(--danger);
     color: var(--danger);
     background: rgba(239, 71, 111, 0.1);
 }
 
-.jira-panel-body {
+.jira-side-panel-body {
     flex: 1;
     overflow-y: auto;
     padding: 20px;

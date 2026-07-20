@@ -1,4 +1,5 @@
 import pytest
+
 from ppbot.game import Initiator
 
 

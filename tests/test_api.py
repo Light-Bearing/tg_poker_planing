@@ -22,6 +22,7 @@ from web_api import (
     api_vote,
     health,
     info,
+    reset_rate_limits,
     web_index,
 )
 from websocket_handler import websocket_endpoint
@@ -40,12 +41,12 @@ def _setup_state(tmp_path):
     asyncio.run(_init())
     manager.session_users.clear()
     manager.active_connections.clear()
+    reset_rate_limits()
 
     yield
 
     async def _close():
-        if state.storage._db:
-            await state.storage._db.close()
+        await state.storage.close()
 
     asyncio.run(_close())
 
@@ -125,7 +126,9 @@ class TestSessions:
     def test_list_sessions_empty(self, client):
         resp = client.get("/api/sessions")
         assert resp.status_code == 200
-        assert resp.json()["sessions"] == []
+        data = resp.json()
+        assert data["sessions"] == []
+        assert data["total"] == 0
 
     def test_list_sessions(self, client):
         client.post("/api/sessions", json={"username": "Alice", "text": "Task 1"})
@@ -135,6 +138,7 @@ class TestSessions:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["sessions"]) == 2
+        assert data["total"] == 2
 
 
 class TestVoting:
