@@ -1,46 +1,46 @@
 # Planning Poker — Telegram Bot + Web Interface
 
-🤖 **Planning Poker** — это инструмент для командной оценки задач по методике Planning Poker. Поддерживает Telegram бота и веб-интерфейс с реаль-time синхронизацией через WebSocket.
+**Planning Poker** — это инструмент для командной оценки задач по методике Planning Poker. Поддерживает Telegram бота и веб-интерфейс с реаль-time синхронизацией через WebSocket.
 
-## 🎯 Возможности
+## Возможности
 
 ### Общие
-- ✅ Создание сессий планирования покера
-- ✅ Анонимное голосование до открытия карт
-- ✅ Авто-открытие карт при голосе всех участников
-- ✅ Перезапуск голосования и открытие результатов
-- ✅ Поддержка многострочных описаний задач
-- ✅ Сохранение состояния в SQLite базу данных
-- ✅ Кастомные шкалы оценок
-- ✅ **Горячие клавиши** (1-9 голосовать, R сброс, O открыть, N новая задача, J отправить в Jira)
+- Создание сессий планирования покера
+- Анонимное голосование до открытия карт
+- Авто-открытие карт при голосе всех участников
+- Перезапуск голосования и открытие результатов
+- Поддержка многострочных описаний задач
+- Сохранение состояния в SQLite базу данных
+- Кастомные шкалы оценок
+- **Горячие клавиши** (1-9 голосовать, R сброс, O открыть, N новая задача, J отправить в Jira)
 
 ### Telegram
-- 📱 Создание сессий через команды `/poker` или `/покер`
-- 🔔 Push-уведомления через Telegram Long Polling / Webhook
-- 🌐 Поддержка прокси (HTTP/SOCKS5) для обхода ограничений
+- Создание сессий через команды `/poker` или `/покер`
+- Push-уведомления через Telegram Long Polling / Webhook
+- Поддержка прокси (HTTP/SOCKS5) для обхода ограничений
 
 ### Web Interface
-- 💻 Современный UI с темной/светлой темой
-- 🔄 Real-time синхронизация через WebSocket
-- 👥 Индикация онлайн-участников
-- 📊 Визуализация распределения голосов (гистограмма)
-- 🎵 Звуковые уведомления
-- 📋 История последних сессий (localStorage)
+- Современный UI с темной/светлой темой
+- Real-time синхронизация через WebSocket
+- Индикация онлайн-участников
+- Визуализация распределения голосов (гистограмма)
+- Звуковые уведомления
+- История последних сессий (localStorage)
 
 ### Jira Integration (Browser Extension)
-- 🔗 Интеграция с Jira через браузерное расширение
-- 📋 Загрузка задач из Jira по JQL-фильтру
-- 🎯 Автоматическое заполнение описания задачи
-- 🏷 Отображение имени эпика в дереве задач
-- 🔄 Показ связанных задач со статусами и сроками
-- 💾 Отправка оценки (Story Points) обратно в Jira
-- ✏️ Редактирование результата перед отправкой
-- 📤 Быстрая отправка — клавиша **J**
-- 🔗 Форматирование Jira wiki ссылок в описании
+- Интеграция с Jira через браузерное расширение
+- Загрузка задач из Jira по JQL-фильтру
+- Автоматическое заполнение описания задачи
+- Отображение имени эпика в дереве задач
+- Показ связанных задач со статусами и сроками
+- Отправка оценки (Story Points) обратно в Jira
+- Редактирование результата перед отправкой
+- Быстрая отправка — клавиша **J**
+- Форматирование Jira wiki ссылок в описании
 
 ---
 
-## 🚀 Быстрый старт
+## Быстрый старт
 
 ### 1. Создание Telegram бота
 
@@ -57,7 +57,7 @@ cd tg_poker_planing
 
 # Создайте виртуальное окружение
 python3 -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate # Windows: .venv\Scripts\activate
 
 # Установите зависимости
 pip install -r requirements.txt
@@ -72,10 +72,10 @@ pip install -r requirements.txt
 TELEGRAM_BOT_TOKEN=ваш_токен_бота_от_BotFather
 
 # Опциональные переменные
-PP_BOT_DB_PATH=/tmp/tg_pp_bot.db  # Путь к базе данных
-PROXY_URL=http://proxy:port        # Прокси для Telegram (опционально)
-RENDER_EXTERNAL_URL=ваш_домен      # Для webhook режима (опционально)
-PORT=8000                          # Port для веб-сервера (default: 8000)
+PP_BOT_DB_PATH=/tmp/tg_pp_bot.db # Путь к базе данных
+PROXY_URL=http://proxy:port # Прокси для Telegram (опционально)
+RENDER_EXTERNAL_URL=ваш_домен # Для webhook режима (опционально)
+PORT=8000 # Port для веб-сервера (default: 8000)
 ```
 
 **Примеры прокси:**
@@ -98,7 +98,7 @@ python3 main.py
 
 ---
 
-## 🐳 Запуск через Docker
+## Запуск через Docker
 
 ### 1. Быстрый запуск
 
@@ -119,13 +119,13 @@ docker build -t planning_poker_bot .
 
 # Запуск контейнера
 docker run -d \
-  --name planning_poker_bot \
-  --restart=unless-stopped \
-  -p 8000:8000 \
-  -e TELEGRAM_BOT_TOKEN="ваш_токен_бота" \
-  -e PP_BOT_DB_PATH="/db/tg_pp_bot.db" \
-  -v ~/.ppbot/:/db/ \
-  planning_poker_bot
+ --name planning_poker_bot \
+ --restart=unless-stopped \
+ -p 8000:8000 \
+ -e TELEGRAM_BOT_TOKEN="ваш_токен_бота" \
+ -e PP_BOT_DB_PATH="/db/tg_pp_bot.db" \
+ -v ~/.ppbot/:/db/ \
+ planning_poker_bot
 ```
 
 ### 3. Docker Compose (рекомендуется)
@@ -136,18 +136,18 @@ docker run -d \
 version: '3.8'
 
 services:
-  planning-poker:
-    build: .
-    container_name: planning_poker_bot
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - PP_BOT_DB_PATH=/db/tg_pp_bot.db
-      - PROXY_URL=${PROXY_URL:-}
-    volumes:
-      - ./data:/db
+ planning-poker:
+ build: .
+ container_name: planning_poker_bot
+ restart: unless-stopped
+ ports:
+ - "8000:8000"
+ environment:
+ - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+ - PP_BOT_DB_PATH=/db/tg_pp_bot.db
+ - PROXY_URL=${PROXY_URL:-}
+ volumes:
+ - ./data:/db
 ```
 
 Запуск:
@@ -162,7 +162,7 @@ docker-compose up -d
 
 ---
 
-## 💻 Использование
+## Использование
 
 ### Telegram Бот
 
@@ -240,45 +240,45 @@ docker-compose up -d
 
 ---
 
-## 🏗️ Архитектура
+## Архитектура
 
 ### Структура проекта
 
 ```
 tg_poker_planing/
-├── main.py                 # Точка входа, запуск сервера и бота
-├── app.py                  # Создание Starlette приложения
-├── config.py               # Конфигурация и логгирование
-├── state.py               # Глобальное состояние (storage, templates)
+├── main.py # Точка входа, запуск сервера и бота
+├── app.py # Создание Starlette приложения
+├── config.py # Конфигурация и логгирование
+├── state.py # Глобальное состояние (storage, templates)
 │
-├── telegram_bot.py         # Обработчики Telegram бота
-├── web_api.py             # REST API для веб-интерфейса
-├── websocket_handler.py   # WebSocket обработчики
-├── connection.py          # Управление WebSocket подключениями
+├── telegram_bot.py # Обработчики Telegram бота
+├── web_api.py # REST API для веб-интерфейса
+├── websocket_handler.py # WebSocket обработчики
+├── connection.py # Управление WebSocket подключениями
 │
 ├── ppbot/
-│   ├── __init__.py
-│   └── game.py            # Логика игры, Game, Vote, GameRegistry
+│ ├── __init__.py
+│ └── game.py # Логика игры, Game, Vote, GameRegistry
 │
 ├── web/
-│   ├── templates/
-│   │   └── index.html     # HTML шаблон
-│   └── static/
-│       ├── script.js      # Frontend логика
-│       └── styles.css     # Стили
+│ ├── templates/
+│ │ └── index.html # HTML шаблон
+│ └── static/
+│ ├── script.js # Frontend логика
+│ └── styles.css # Стили
 │
-├── browser-extension/     # Jira интеграция (Chrome Extension)
-├── tests/                 # Тесты
-│   ├── test_game.py
-│   ├── test_api.py
-│   ├── test_telegram_bot.py
-│   ├── test_websocket.py
-│   └── test_app.py
+├── browser-extension/ # Jira интеграция (Chrome Extension)
+├── tests/ # Тесты
+│ ├── test_game.py
+│ ├── test_api.py
+│ ├── test_telegram_bot.py
+│ ├── test_websocket.py
+│ └── test_app.py
 │
-├── requirements.txt       # Python зависимости
-├── Dockerfile            # Docker образ
-├── run.sh               # Скрипт запуска
-└── .env.example         # Пример конфигурации
+├── requirements.txt # Python зависимости
+├── Dockerfile # Docker образ
+├── run.sh # Скрипт запуска
+└── .env.example # Пример конфигурации
 ```
 
 ### Основные компоненты
@@ -308,18 +308,18 @@ tg_poker_planing/
 
 ---
 
-## ⚙️ Конфигурация
+## Конфигурация
 
 ### Переменные окружения
 
 | Переменная | Обязательная | По умолчанию | Описание |
 |------------|--------------|--------------|----------|
-| `TELEGRAM_BOT_TOKEN` | ✅ | - | Токен бота от BotFather |
-| `PP_BOT_DB_PATH` | ❌ | `/tmp/tg_pp_bot.db` | Путь к файлу базы данных |
-| `PROXY_URL` | ❌ | - | Прокси для Telegram (HTTP/SOCKS5) |
-| `RENDER_EXTERNAL_URL` | ❌ | - | URL для webhook режима |
-| `WEBHOOK_URL` | ❌ | - | Альтернативный URL для webhook |
-| `PORT` | ❌ | `8000` | Порт веб-сервера |
+| `TELEGRAM_BOT_TOKEN` | | - | Токен бота от BotFather |
+| `PP_BOT_DB_PATH` | | `/tmp/tg_pp_bot.db` | Путь к файлу базы данных |
+| `PROXY_URL` | | - | Прокси для Telegram (HTTP/SOCKS5) |
+| `RENDER_EXTERNAL_URL` | | - | URL для webhook режима |
+| `WEBHOOK_URL` | | - | Альтернативный URL для webhook |
+| `PORT` | | `8000` | Порт веб-сервера |
 
 ### Шкалы оценок
 
@@ -327,11 +327,11 @@ tg_poker_planing/
 
 ```python
 SCALES = {
-    "custom": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", 
-               "11", "12", "14", "16", "18", "20", "28", "40", "❔", "☕"],
-    "fibonacci": ["1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "❔", "☕"],
-    "powers_of_2": ["1", "2", "4", "8", "16", "32", "64", "❔", "☕"],
-    "tshirt": ["XS", "S", "M", "L", "XL", "XXL", "❔", "☕"],
+ "custom": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+ "11", "12", "14", "16", "18", "20", "28", "40", "❔", "☕"],
+ "fibonacci": ["1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "❔", "☕"],
+ "powers_of_2": ["1", "2", "4", "8", "16", "32", "64", "❔", "☕"],
+ "tshirt": ["XS", "S", "M", "L", "XL", "XXL", "❔", "☕"],
 }
 ```
 
@@ -344,22 +344,22 @@ SCALES = {
 ```sql
 -- Активные сессии
 CREATE TABLE IF NOT EXISTS games (
-    chat_id TEXT,
-    game_id TEXT,
-    json_data TEXT,
-    PRIMARY KEY (chat_id, game_id)
+ chat_id TEXT,
+ game_id TEXT,
+ json_data TEXT,
+ PRIMARY KEY (chat_id, game_id)
 );
 
 -- Пользовательские шкалы
 CREATE TABLE IF NOT EXISTS custom_scales (
-    initiator_key TEXT PRIMARY KEY,
-    points TEXT NOT NULL
+ initiator_key TEXT PRIMARY KEY,
+ points TEXT NOT NULL
 );
 ```
 
 ---
 
-## 🧪 Разработка
+## Разработка
 
 ### Запуск в режиме разработки
 
@@ -409,7 +409,7 @@ ruff check --fix .
 
 ---
 
-## 🔌 Jira Integration
+## Jira Integration
 
 ### Установка расширения
 
@@ -433,13 +433,13 @@ ruff check --fix .
 
 1. Создайте или откройте сессию
 2. Нажмите **"⚡ JIRA"**
-3. Нажмите **"🔄 ЗАГРУЗИТЬ ЗАДАЧИ"**
+3. Нажмите **"ЗАГРУЗИТЬ ЗАДАЧИ"**
 4. Выберите задачу из дерева
 5. Нажмите **"▸ ПРИМЕНИТЬ К ЗАДАЧЕ"**
 
 ---
 
-## 📡 API Documentation
+## API Documentation
 
 ### REST API
 
@@ -449,9 +449,9 @@ POST /api/sessions
 Content-Type: application/json
 
 {
-  "username": "alice",
-  "text": "Описание задачи",
-  "scale_name": "fibonacci"
+ "username": "alice",
+ "text": "Описание задачи",
+ "scale_name": "fibonacci"
 }
 ```
 
@@ -461,8 +461,8 @@ POST /api/sessions/{session_id}/vote
 Content-Type: application/json
 
 {
-  "username": "alice",
-  "point": "5"
+ "username": "alice",
+ "point": "5"
 }
 ```
 
@@ -472,7 +472,7 @@ POST /api/sessions/{session_id}/reveal
 Content-Type: application/json
 
 {
-  "username": "alice"
+ "username": "alice"
 }
 ```
 
@@ -482,8 +482,8 @@ POST /api/sessions/{session_id}/restart
 Content-Type: application/json
 
 {
-  "username": "alice",
-  "new_text": "Новое описание"
+ "username": "alice",
+ "new_text": "Новое описание"
 }
 ```
 
@@ -493,7 +493,7 @@ POST /api/sessions/{session_id}/scale
 Content-Type: application/json
 
 {
-  "scale_name": "fibonacci"
+ "scale_name": "fibonacci"
 }
 ```
 
@@ -506,14 +506,14 @@ Content-Type: application/json
 ```json
 // Join to session
 {
-  "type": "join",
-  "username": "alice"
+ "type": "join",
+ "username": "alice"
 }
 
 // Set scale
 {
-  "type": "set_scale",
-  "scale_name": "fibonacci"
+ "type": "set_scale",
+ "scale_name": "fibonacci"
 }
 
 // Ping/Pong
@@ -525,33 +525,33 @@ Content-Type: application/json
 ```json
 // Initial data
 {
-  "type": "init",
-  "data": { /* session data */ }
+ "type": "init",
+ "data": { /* session data */ }
 }
 
 // Update
 {
-  "type": "update",
-  "data": { /* updated session data */ }
+ "type": "update",
+ "data": { /* updated session data */ }
 }
 
 // User events
 {
-  "type": "user_joined",
-  "username": "alice",
-  "data": { /* session data */ }
+ "type": "user_joined",
+ "username": "alice",
+ "data": { /* session data */ }
 }
 
 {
-  "type": "user_left",
-  "username": "alice",
-  "data": { /* session data */ }
+ "type": "user_left",
+ "username": "alice",
+ "data": { /* session data */ }
 }
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Бот не отвечает
 
@@ -588,7 +588,7 @@ chmod 644 $PP_BOT_DB_PATH
 
 ---
 
-## 📊 Тестирование
+## Тестирование
 
 ### Покрытие кода
 
@@ -607,13 +607,13 @@ open htmlcov/index.html
 
 ---
 
-## 📝 Лицензия
+## Лицензия
 
 MIT License
 
 ---
 
-## 🤝 Вклад в проект
+## Вклад в проект
 
 1. Форкните репозиторий
 2. Создайте ветку для фичи (`git checkout -b feature/amazing-feature`)
@@ -623,7 +623,7 @@ MIT License
 
 ---
 
-## 📞 Поддержка
+## Поддержка
 
 При возникновении проблем:
 1. Проверьте логи сервера
@@ -632,26 +632,26 @@ MIT License
 
 ---
 
-## 🛠 Changelog
+## Changelog
 
 ### Версия 1.1.0 (текущая)
 
-- ✅ Jira интеграция: выбор задач, эпики, связанные задачи
-- ✅ Отправка оценки в Jira через браузерное расширение
-- ✅ Jira wiki форматирование: [text|url], [PROJ-123], ссылки
-- ✅ Редактируемый результат (contenteditable) с валидацией
-- ✅ Авто-открытие карт при голосе всех участников
-- ✅ Горячие клавиши: 1-9, R, O, N, J, Esc
-- ✅ Epic Name в заголовке задачи
-- ✅ Связанные задачи со статусами и датами
-- ✅ Передача данных Jira всем участникам через JSON
-- ✅ Улучшенный layout: результат наверх, анализ+гистограмма вместе
+- Jira интеграция: выбор задач, эпики, связанные задачи
+- Отправка оценки в Jira через браузерное расширение
+- Jira wiki форматирование: [text|url], [PROJ-123], ссылки
+- Редактируемый результат (contenteditable) с валидацией
+- Авто-открытие карт при голосе всех участников
+- Горячие клавиши: 1-9, R, O, N, J, Esc
+- Epic Name в заголовке задачи
+- Связанные задачи со статусами и датами
+- Передача данных Jira всем участникам через JSON
+- Улучшенный layout: результат наверх, анализ+гистограмма вместе
 
 ### Версия 1.0.0
 
-- ✅ Web интерфейс с WebSocket
-- ✅ Jira интеграция через browser extension
-- ✅ Кастомные шкалы оценок
-- ✅ Темная/светлая тема
-- ✅ Звуковые уведомления
-- ✅ Гистограмма распределения голосов
+- Web интерфейс с WebSocket
+- Jira интеграция через browser extension
+- Кастомные шкалы оценок
+- Темная/светлая тема
+- Звуковые уведомления
+- Гистограмма распределения голосов

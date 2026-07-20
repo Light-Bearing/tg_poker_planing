@@ -14,32 +14,41 @@
     // ========== TEXT MARKS ==========
     function renderMarks(text, marks) {
         if (!marks || marks.length === 0) return escapeHtml(text);
-        let result = escapeHtml(text);
-        for (const mark of marks) {
+        var hasLink = marks.some(function(m) { return m.type === 'link'; });
+        var result = escapeHtml(text);
+        for (var i = 0; i < marks.length; i++) {
+            var mark = marks[i];
             switch (mark.type) {
-                case 'strong': result = `<strong>${result}</strong>`; break;
-                case 'em': result = `<em>${result}</em>`; break;
-                case 'code': result = `<code>${result}</code>`; break;
-                case 'strike': result = `<s>${result}</s>`; break;
-                case 'underline': result = `<u>${result}</u>`; break;
+                case 'strong': result = '<strong>' + result + '</strong>'; break;
+                case 'em': result = '<em>' + result + '</em>'; break;
+                case 'code': result = '<code>' + result + '</code>'; break;
+                case 'strike': {
+                    // Jira может применить strike к тексту между дефисами внутри
+                    // Markdown-ссылок [text](url) или путей. Если нет link-марки,
+                    // а в тексте есть URL/путевые символы — это ложное зачёркивание.
+                    if (!hasLink && (/[\/()]/.test(text) || /^https?:\/\//i.test(text))) break;
+                    result = '<s>' + result + '</s>';
+                    break;
+                }
+                case 'underline': result = '<u>' + result + '</u>'; break;
                 case 'subsup': {
-                    const type = mark.attrs?.type || 'sub';
-                    result = type === 'sup' ? `<sup>${result}</sup>` : `<sub>${result}</sub>`;
+                    var type = mark.attrs && mark.attrs.type || 'sub';
+                    result = type === 'sup' ? '<sup>' + result + '</sup>' : '<sub>' + result + '</sub>';
                     break;
                 }
                 case 'link': {
-                    const href = escapeHtml(mark.attrs?.href || '#');
-                    result = `<a href="${href}" target="_blank" class="jira-desc-link">${result}</a>`;
+                    var href = escapeHtml(mark.attrs && mark.attrs.href || '#');
+                    result = '<a href="' + href + '" target="_blank" class="jira-desc-link">' + result + '</a>';
                     break;
                 }
                 case 'textColor': {
-                    const color = mark.attrs?.color || 'inherit';
-                    result = `<span style="color:${color}">${result}</span>`;
+                    var color = mark.attrs && mark.attrs.color || 'inherit';
+                    result = '<span style="color:' + color + '">' + result + '</span>';
                     break;
                 }
                 case 'backgroundColor': {
-                    const bg = mark.attrs?.color || 'transparent';
-                    result = `<span style="background:${bg}">${result}</span>`;
+                    var bg = mark.attrs && mark.attrs.color || 'transparent';
+                    result = '<span style="background:' + bg + '">' + result + '</span>';
                     break;
                 }
             }
@@ -208,9 +217,14 @@
         html = html.replace(/(?:^|\n)((?:<li>.*?<\/li>(?:\n|$))+)/g, '\n<ul>$1</ul>\n');
 
         html = html.replace(/\{\{(.+?)\}\}/g, '<code>$1</code>');
-        html = html.replace(/-([\S\x20]+?)-/g, (match, text) => {
+        html = html.replace(/-([\S\x20]+?)-/g, function(match, text, offset) {
             if (match.startsWith('[') || match.endsWith(']')) return match;
-            return `<s>${text}</s>`;
+            if (/[\/()]/.test(text) || /^https?/.test(text)) return match;
+            var before = html.substring(0, offset);
+            var openBrackets = (before.match(/\[/g) || []).length;
+            var closeBrackets = (before.match(/\]/g) || []).length;
+            if (openBrackets > closeBrackets) return match;
+            return '<s>' + text + '</s>';
         });
         html = html.replace(/\+(.+?)\+/g, '<u>$1</u>');
         html = html.replace(/\^(.+?)\^/g, '<sup>$1</sup>');

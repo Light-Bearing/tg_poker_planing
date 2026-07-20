@@ -117,8 +117,7 @@ body::before {
 
 .header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 24px; background: var(--bg-card); backdrop-filter: blur(12px);
-    border-bottom: 1px solid var(--border); flex-shrink: 0;
+    padding: 10px 24px; background: var(--bg-body); border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .header h1 { font-family: var(--font-header); font-size: 1.4em; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; }
 .header h1 .logo-icon { color: var(--accent); margin-right: 8px; }
@@ -156,8 +155,7 @@ body::before {
 .bottom-panel { 
     grid-column: 1 / -1; 
     padding: 14px 20px; 
-    background: var(--bg-card); 
-    backdrop-filter: blur(12px); 
+    background: var(--bg-body); 
     border-top: 1px solid var(--border); 
     position: relative; 
 }
@@ -223,8 +221,7 @@ body::before {
 
 /* ========== CARDS ========== */
 .card {
-    background: var(--bg-card); backdrop-filter: blur(8px);
-    border: 1px solid var(--border); border-radius: 2px; padding: 16px; margin-bottom: 12px; position: relative;
+    background: var(--bg-body); border: 1px solid var(--border); border-radius: 2px; padding: 16px; margin-bottom: 12px; position: relative;
 }
 .card::before, .card::after { content: ''; position: absolute; width: var(--corner-size); height: var(--corner-size); pointer-events: none; }
 .card::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
@@ -1287,8 +1284,7 @@ code {
 }
 
 .toast {
-    background: var(--bg-card);
-    backdrop-filter: blur(12px);
+    background: var(--bg-body);
     border: 1px solid var(--border);
     border-radius: 2px;
     padding: 14px 18px;
@@ -1399,13 +1395,11 @@ code {
     position: absolute;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
 }
 
 .confirm-dialog {
     position: relative;
-    background: var(--bg-card);
-    backdrop-filter: blur(12px);
+    background: var(--bg-body);
     border: 1px solid var(--border);
     border-radius: 2px;
     padding: 24px;
@@ -1662,7 +1656,7 @@ code {
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--accent-hover));
     border-radius: 2px;
-    transition: width 0.5s ease;
+    transition: width 0.2s ease;
     min-width: 2px;
     box-shadow: 0 0 6px var(--accent-glow);
 }
@@ -1816,8 +1810,7 @@ code {
     right: 0;
     width: 380px;
     height: 100vh;
-    background: var(--bg-card);
-    backdrop-filter: blur(16px);
+    background: var(--bg-body);
     border-left: 1px solid var(--border);
     z-index: 9999;
     display: flex;
