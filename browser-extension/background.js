@@ -4,6 +4,14 @@
 const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
 const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
 
+// Единый хелпер для заголовков запросов к Jira.
+// В Firefox подменяем User-Agent на Chrome — некоторые nginx блокируют Firefox по UA.
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+function jiraAuth(token, extra = {}) {
+    return { ...extra, 'Authorization': `Bearer ${token}`, 'User-Agent': CHROME_UA };
+}
+
 // Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
 function friendlyError(err) {
     const msg = typeof err === 'string' ? err : String(err);
@@ -38,7 +46,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'testConnection') {
         const { jiraUrl, jiraToken } = message;
         fetch(`${jiraUrl}/rest/api/2/myself`, {
-            headers: { 'Authorization': `Bearer ${jiraToken}` },
+            headers: jiraAuth(jiraToken),
         })
             .then(r => {
                 if (r.ok) return r.json();
@@ -68,7 +76,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'getFields') {
         const { jiraUrl, jiraToken } = message;
         fetch(`${jiraUrl}/rest/api/2/field`, {
-            headers: { 'Authorization': `Bearer ${jiraToken}` },
+            headers: jiraAuth(jiraToken),
         })
             .then(r => r.json())
             .then(data => sendResponse({ ok: true, fields: data }))
@@ -82,7 +90,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         const fieldsParam = fields.split(',').map(f => f.trim()).filter(Boolean).join(',');
         fetch(
             `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
-            { headers: { 'Authorization': `Bearer ${jiraToken}` } }
+            { headers: jiraAuth(jiraToken) }
         )
             .then(r => r.json())
             .then(data => sendResponse({ ok: true, issues: data.issues || [] }))
@@ -95,10 +103,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { jiraUrl, jiraToken, issueKey, fieldId, value } = message;
         fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}`, {
             method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${jiraToken}`,
-                'Content-Type': 'application/json',
-            },
+            headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({ fields: { [fieldId]: value } }),
         })
             .then(r => {
@@ -125,10 +130,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { jiraUrl, jiraToken, issueKey, comment } = message;
         fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}/comment`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${jiraToken}`,
-                'Content-Type': 'application/json',
-            },
+            headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({ body: comment }),
         })
             .then(r => {
