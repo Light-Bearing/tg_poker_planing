@@ -152,9 +152,12 @@ console.log('Jira: starting auto-connect (delayed after pp-jira-ready)');
             }, JIRA_AUTO_CONNECT_DELAY);
 });
 
-// Слушаем ответы от расширения
-document.addEventListener('pp-jira-response', (event) => {
-    const { msgId, response } = event.detail;
+// Слушаем ответы от расширения (через postMessage — безопасно для Firefox Xray)
+window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    if (!event.data || event.data.source !== 'pp-jira-ext') return;
+
+    const { msgId, response } = event.data;
     const resolve = _jiraPending.get(msgId);
     if (resolve) {
         _jiraPending.delete(msgId);
@@ -170,9 +173,12 @@ function jiraSendMessage(msg) {
         }
         const msgId = ++_jiraMsgId;
         _jiraPending.set(msgId, resolve);
-        document.dispatchEvent(new CustomEvent('pp-jira-message', {
-            detail: { msg, msgId }
-        }));
+        // postMessage использует structured clone — надёжно работает в Chrome и Firefox
+        window.postMessage({
+            source: 'pp-jira-page',
+            msg,
+            msgId,
+        }, '*');
     });
 }
 
