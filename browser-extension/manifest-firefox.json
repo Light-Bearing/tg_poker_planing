@@ -10,9 +10,7 @@
   },
   "permissions": [
     "storage",
-    "<all_urls>",
-    "webRequest",
-    "webRequestBlocking"
+    "<all_urls>"
   ],
   "background": {
     "scripts": ["background.js"],

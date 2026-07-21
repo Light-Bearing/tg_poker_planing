@@ -4,37 +4,9 @@
 const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
 const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
 
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
-
 // Хелпер для заголовков запросов к Jira
 function jiraAuth(token, extra = {}) {
     return { ...extra, 'Authorization': `Bearer ${token}` };
-}
-
-// Firefox: перехватываем HTTP-запросы к Jira API и подменяем User-Agent
-// (через headers в fetch — forbidden, браузер игнорирует)
-if (typeof browser !== 'undefined' && browser.webRequest) {
-    console.log('[PP] webRequest listener registered');
-    browser.webRequest.onBeforeSendHeaders.addListener(
-        (details) => {
-            console.log('[PP] Intercepted:', details.url, 'method:', details.method);
-            // Логируем текущие заголовки перед изменением
-            for (const h of details.requestHeaders) {
-                console.log('[PP]   req header:', h.name, '=', h.value.slice(0, 80));
-            }
-            const ua = details.requestHeaders.find(h => h.name.toLowerCase() === 'user-agent');
-            if (ua) {
-                console.log('[PP] Replacing UA:', ua.value, '->', CHROME_UA);
-                ua.value = CHROME_UA;
-            } else {
-                console.log('[PP] No UA header found, adding:', CHROME_UA);
-                details.requestHeaders.push({ name: 'User-Agent', value: CHROME_UA });
-            }
-            return { requestHeaders: details.requestHeaders };
-        },
-        { urls: ['<all_urls>'] },
-        ['blocking', 'requestHeaders']
-    );
 }
 
 // Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
