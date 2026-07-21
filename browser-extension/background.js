@@ -14,14 +14,25 @@ function jiraAuth(token, extra = {}) {
 // Firefox: перехватываем HTTP-запросы к Jira API и подменяем User-Agent
 // (через headers в fetch — forbidden, браузер игнорирует)
 if (typeof browser !== 'undefined' && browser.webRequest) {
+    console.log('[PP] webRequest listener registered');
     browser.webRequest.onBeforeSendHeaders.addListener(
         (details) => {
+            console.log('[PP] Intercepted:', details.url, 'method:', details.method);
+            // Логируем текущие заголовки перед изменением
+            for (const h of details.requestHeaders) {
+                console.log('[PP]   req header:', h.name, '=', h.value.slice(0, 80));
+            }
             const ua = details.requestHeaders.find(h => h.name.toLowerCase() === 'user-agent');
-            if (ua) ua.value = CHROME_UA;
-            else details.requestHeaders.push({ name: 'User-Agent', value: CHROME_UA });
+            if (ua) {
+                console.log('[PP] Replacing UA:', ua.value, '->', CHROME_UA);
+                ua.value = CHROME_UA;
+            } else {
+                console.log('[PP] No UA header found, adding:', CHROME_UA);
+                details.requestHeaders.push({ name: 'User-Agent', value: CHROME_UA });
+            }
             return { requestHeaders: details.requestHeaders };
         },
-        { urls: ['*://*/rest/api/2/*'] },
+        { urls: ['<all_urls>'] },
         ['blocking', 'requestHeaders']
     );
 }
