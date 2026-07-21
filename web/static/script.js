@@ -152,9 +152,9 @@ console.log('Jira: starting auto-connect (delayed after pp-jira-ready)');
             }, JIRA_AUTO_CONNECT_DELAY);
 });
 
-// Слушаем ответы от расширения (через postMessage — безопасно для Firefox Xray)
+// Слушаем ответы от расширения (через postMessage)
+// event.source не проверяем — content script и страница в разных изолированных мирах
 window.addEventListener('message', (event) => {
-    if (event.source !== window) return;
     if (!event.data || event.data.source !== 'pp-jira-ext') return;
 
     const { msgId, response } = event.data;

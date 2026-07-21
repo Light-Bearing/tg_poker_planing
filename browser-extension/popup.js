@@ -119,7 +119,7 @@ async function testConnection() {
 
   try {
     const response = await fetch(`${jiraUrl}/rest/api/2/myself`, {
-      headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` }
+      headers: { 'Authorization': `Bearer ${jiraToken}` }
     });
 
     if (response.ok) {
@@ -149,7 +149,7 @@ async function loadFields() {
 
   try {
     const response = await fetch(`${jiraUrl}/rest/api/2/field`, {
-      headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` }
+      headers: { 'Authorization': `Bearer ${jiraToken}` }
     });
 
     if (!response.ok) {
@@ -196,11 +196,6 @@ async function loadFields() {
     fieldsListEl.innerHTML = `Ошибка: ${err.message}`;
     showStatus('connectionStatus', `Ошибка загрузки полей: ${err.message}`, 'error');
   }
-}
-
-// Удаляет не-ASCII символы из строки для HTTP-заголовков (Firefox)
-function asciiOnly(value) {
-    return typeof value === 'string' ? value.replace(/[^\x20-\x7e]/g, '') : '';
 }
 
 // Показать статус
