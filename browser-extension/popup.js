@@ -119,7 +119,7 @@ async function testConnection() {
 
   try {
     const response = await fetch(`${jiraUrl}/rest/api/2/myself`, {
-      headers: { 'Authorization': `Bearer ${jiraToken}` }
+      headers: jiraAuth(jiraToken)
     });
 
     if (response.ok) {
@@ -149,7 +149,7 @@ async function loadFields() {
 
   try {
     const response = await fetch(`${jiraUrl}/rest/api/2/field`, {
-      headers: { 'Authorization': `Bearer ${jiraToken}` }
+      headers: jiraAuth(jiraToken)
     });
 
     if (!response.ok) {
@@ -196,6 +196,12 @@ async function loadFields() {
     fieldsListEl.innerHTML = `Ошибка: ${err.message}`;
     showStatus('connectionStatus', `Ошибка загрузки полей: ${err.message}`, 'error');
   }
+}
+
+// Chrome User-Agent для обхода nginx, блокирующих Firefox
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+function jiraAuth(token, extra = {}) {
+    return { ...extra, 'Authorization': `Bearer ${token}`, 'User-Agent': CHROME_UA };
 }
 
 // Показать статус
