@@ -15,8 +15,9 @@ const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtim
 
 // Слушаем сообщения от страницы через postMessage
 window.addEventListener('message', async (event) => {
-    // Только свои сообщения (same-origin) от окна
-    if (event.source !== window) return;
+    // Фильтр: только наши сообщения по полю source
+    // НЕ используем event.source — в Chrome content script и страница живут в разных
+    // изолированных мирах, поэтому event.source !== window всегда true
     if (!event.data) return;
     if (event.data.source !== 'pp-jira-page') return;
 

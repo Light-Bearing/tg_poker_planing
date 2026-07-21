@@ -4,6 +4,15 @@
 const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
 const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
 
+// Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
+function friendlyError(err) {
+    const msg = typeof err === 'string' ? err : String(err);
+    if (msg.includes('ByteString') || msg.includes('greater than 255')) {
+        return 'Токен содержит недопустимые символы. Используйте только латинские буквы и цифры.';
+    }
+    return msg;
+}
+
 // Promise-обёртка для storage.local.get (единый API для Chrome и Firefox)
 function storageGet(keys) {
     return new Promise(resolve => {
@@ -16,12 +25,6 @@ function storageSet(obj) {
     return new Promise(resolve => {
         storage.local.set(obj, () => resolve({ ok: true }));
     });
-}
-
-// Удаляет не-ASCII символы из строки для HTTP-заголовков
-// Firefox требует ByteString (символы 0-255) в заголовках fetch
-function asciiOnly(value) {
-    return typeof value === 'string' ? value.replace(/[^\x20-\x7e]/g, '') : '';
 }
 
 runtime.onMessage.addListener((message) => {
@@ -45,22 +48,22 @@ runtime.onMessage.addListener((message) => {
     if (message.type === 'testConnection') {
         const { jiraUrl, jiraToken } = message;
         return fetch(`${jiraUrl}/rest/api/2/myself`, {
-            headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` },
+            headers: { 'Authorization': `Bearer ${jiraToken}` },
         })
             .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
             .then(data => ({ ok: true, displayName: data.displayName }))
-            .catch(err => ({ ok: false, error: String(err) }));
+            .catch(err => ({ ok: false, error: friendlyError(err) }));
     }
 
     // Получить список полей (чтобы найти Story Points)
     if (message.type === 'getFields') {
         const { jiraUrl, jiraToken } = message;
         return fetch(`${jiraUrl}/rest/api/2/field`, {
-            headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` },
+            headers: { 'Authorization': `Bearer ${jiraToken}` },
         })
             .then(r => r.json())
             .then(data => ({ ok: true, fields: data }))
-            .catch(err => ({ ok: false, error: String(err) }));
+            .catch(err => ({ ok: false, error: friendlyError(err) }));
     }
 
     // Поиск задач по JQL
@@ -69,11 +72,11 @@ runtime.onMessage.addListener((message) => {
         const fieldsParam = fields.split(',').map(f => f.trim()).filter(Boolean).join(',');
         return fetch(
             `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
-            { headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` } }
+            { headers: { 'Authorization': `Bearer ${jiraToken}` } }
         )
             .then(r => r.json())
             .then(data => ({ ok: true, issues: data.issues || [] }))
-            .catch(err => ({ ok: false, error: String(err) }));
+            .catch(err => ({ ok: false, error: friendlyError(err) }));
     }
 
     // Установить оценку (story points) задаче
@@ -82,7 +85,7 @@ runtime.onMessage.addListener((message) => {
         return fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}`, {
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${asciiOnly(jiraToken)}`,
+                'Authorization': `Bearer ${jiraToken}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ fields: { [fieldId]: value } }),
@@ -101,7 +104,7 @@ runtime.onMessage.addListener((message) => {
                     return Promise.reject(errMsg || `HTTP ${r.status}`);
                 });
             })
-            .catch(err => ({ ok: false, error: String(err) }));
+            .catch(err => ({ ok: false, error: friendlyError(err) }));
     }
 
     // Добавить комментарий к задаче
@@ -110,7 +113,7 @@ runtime.onMessage.addListener((message) => {
         return fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}/comment`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${asciiOnly(jiraToken)}`,
+                'Authorization': `Bearer ${jiraToken}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ body: comment }),
@@ -119,7 +122,7 @@ runtime.onMessage.addListener((message) => {
                 if (r.ok || r.status === 201) return { ok: true };
                 return r.json().then(e => Promise.reject(e.errors || e.errorMessages?.[0] || `HTTP ${r.status}`));
             })
-            .catch(err => ({ ok: false, error: String(err) }));
+            .catch(err => ({ ok: false, error: friendlyError(err) }));
     }
 });
 
