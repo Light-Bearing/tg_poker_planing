@@ -42,13 +42,22 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
             .then(r => {
                 if (r.ok) return r.json();
-                // Пробуем прочитать тело ошибки (Jira пишет причину 403/401)
-                return r.json().then(body => {
-                    const msg = (body.errorMessages && body.errorMessages.join('; '))
-                        || body.message
-                        || `HTTP ${r.status}`;
+                // Читаем тело ответа как текст, чтобы увидеть что вернула Jira
+                return r.text().then(text => {
+                    let msg = `HTTP ${r.status}`;
+                    try {
+                        const body = JSON.parse(text);
+                        if (body.errorMessages && body.errorMessages.length) {
+                            msg = body.errorMessages.join('; ');
+                        } else if (body.message) {
+                            msg = body.message;
+                        }
+                    } catch (_) {
+                        // Не JSON — может HTML-страница ошибки
+                        if (text && text.length < 300) msg = text;
+                    }
                     return Promise.reject(msg);
-                }).catch(() => Promise.reject(`HTTP ${r.status}`));
+                });
             })
             .then(data => sendResponse({ ok: true, displayName: data.displayName }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
