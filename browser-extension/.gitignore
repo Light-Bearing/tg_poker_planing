@@ -2,7 +2,12 @@
 build-chrome/
 build-firefox/
 build-universal/
+# ZIP-файлы сборок для дистрибуции (должны быть в Git для деплоя)
+# pp-jira-bridge-*.zip — включаем явно
 *.zip
+!pp-jira-bridge-chrome.zip
+!pp-jira-bridge-firefox.zip
+!pp-jira-bridge-all.zip
 
 # IDE
 .idea/
