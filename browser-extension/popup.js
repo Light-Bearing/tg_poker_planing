@@ -198,10 +198,8 @@ async function loadFields() {
   }
 }
 
-// Chrome User-Agent для обхода nginx, блокирующих Firefox
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 function jiraAuth(token, extra = {}) {
-    return { ...extra, 'Authorization': `Bearer ${token}`, 'User-Agent': CHROME_UA };
+    return { ...extra, 'Authorization': `Bearer ${token}` };
 }
 
 // Показать статус
