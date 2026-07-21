@@ -4,12 +4,26 @@
 const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
 const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
 
-// Единый хелпер для заголовков запросов к Jira.
-// В Firefox подменяем User-Agent на Chrome — некоторые nginx блокируют Firefox по UA.
 const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
+// Хелпер для заголовков запросов к Jira
 function jiraAuth(token, extra = {}) {
-    return { ...extra, 'Authorization': `Bearer ${token}`, 'User-Agent': CHROME_UA };
+    return { ...extra, 'Authorization': `Bearer ${token}` };
+}
+
+// Firefox: перехватываем HTTP-запросы к Jira API и подменяем User-Agent
+// (через headers в fetch — forbidden, браузер игнорирует)
+if (typeof browser !== 'undefined' && browser.webRequest) {
+    browser.webRequest.onBeforeSendHeaders.addListener(
+        (details) => {
+            const ua = details.requestHeaders.find(h => h.name.toLowerCase() === 'user-agent');
+            if (ua) ua.value = CHROME_UA;
+            else details.requestHeaders.push({ name: 'User-Agent', value: CHROME_UA });
+            return { requestHeaders: details.requestHeaders };
+        },
+        { urls: ['*://*/rest/api/2/*'] },
+        ['blocking', 'requestHeaders']
+    );
 }
 
 // Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
