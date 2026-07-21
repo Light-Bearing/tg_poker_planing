@@ -18,6 +18,12 @@ function storageSet(obj) {
     });
 }
 
+// Удаляет не-ASCII символы из строки для HTTP-заголовков
+// Firefox требует ByteString (символы 0-255) в заголовках fetch
+function asciiOnly(value) {
+    return typeof value === 'string' ? value.replace(/[^\x20-\x7e]/g, '') : '';
+}
+
 runtime.onMessage.addListener((message) => {
     // Сохранить настройки
     if (message.type === 'saveSettings') {
@@ -39,7 +45,7 @@ runtime.onMessage.addListener((message) => {
     if (message.type === 'testConnection') {
         const { jiraUrl, jiraToken } = message;
         return fetch(`${jiraUrl}/rest/api/2/myself`, {
-            headers: { 'Authorization': `Bearer ${jiraToken}` },
+            headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` },
         })
             .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
             .then(data => ({ ok: true, displayName: data.displayName }))
@@ -50,7 +56,7 @@ runtime.onMessage.addListener((message) => {
     if (message.type === 'getFields') {
         const { jiraUrl, jiraToken } = message;
         return fetch(`${jiraUrl}/rest/api/2/field`, {
-            headers: { 'Authorization': `Bearer ${jiraToken}` },
+            headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` },
         })
             .then(r => r.json())
             .then(data => ({ ok: true, fields: data }))
@@ -63,7 +69,7 @@ runtime.onMessage.addListener((message) => {
         const fieldsParam = fields.split(',').map(f => f.trim()).filter(Boolean).join(',');
         return fetch(
             `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
-            { headers: { 'Authorization': `Bearer ${jiraToken}` } }
+            { headers: { 'Authorization': `Bearer ${asciiOnly(jiraToken)}` } }
         )
             .then(r => r.json())
             .then(data => ({ ok: true, issues: data.issues || [] }))
@@ -76,7 +82,7 @@ runtime.onMessage.addListener((message) => {
         return fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}`, {
             method: 'PUT',
             headers: {
-                'Authorization': `Bearer ${jiraToken}`,
+                'Authorization': `Bearer ${asciiOnly(jiraToken)}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ fields: { [fieldId]: value } }),
@@ -104,7 +110,7 @@ runtime.onMessage.addListener((message) => {
         return fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}/comment`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${jiraToken}`,
+                'Authorization': `Bearer ${asciiOnly(jiraToken)}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ body: comment }),
