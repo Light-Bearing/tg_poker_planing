@@ -299,6 +299,11 @@ class GameRegistry:
         )
         await self._db.commit()
 
+    async def delete_game(self, chat_id, game_id: str) -> None:
+        """Удаляет игру. Используется при истечении срока жизни веб-сессии."""
+        await self._db.execute("DELETE FROM games WHERE chat_id = ? AND game_id = ?", (chat_id, game_id))
+        await self._db.commit()
+
     async def save_custom_scale(self, initiator_key: str, points: list[str]):
         await self._db.execute(
             "INSERT OR REPLACE INTO custom_scales VALUES (?, ?)", (initiator_key, json.dumps(points))

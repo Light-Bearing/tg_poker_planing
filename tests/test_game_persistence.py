@@ -2,7 +2,7 @@
 
 import pytest
 
-from ppbot.game import Game, GameRegistry
+from ppbot.game import Game, GameRegistry, Initiator
 
 
 class TestAutoRevealPersistence:
@@ -65,3 +65,30 @@ class TestAutoRevealDBPersistence:
         loaded = await self.registry.get_game(-100, "s2")
         assert loaded is not None
         assert loaded.auto_reveal is False
+
+
+class TestDeleteGame:
+    @pytest.mark.asyncio
+    async def test_delete_game_удаляет_запись(self, tmp_path):
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        game = reg.new_game("web", "s1", Initiator.from_web("alice"), "task")
+        await reg.save_game(game)
+        assert await reg.get_game("web", "s1") is not None
+        await reg.delete_game("web", "s1")
+        assert await reg.get_game("web", "s1") is None
+        await reg.close()
+
+    @pytest.mark.asyncio
+    async def test_delete_game_не_трогает_чужие(self, tmp_path):
+        """game_id у разных чатов может совпадать — удаление различает их по chat_id."""
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        web = reg.new_game("web", "s1", Initiator.from_web("alice"), "web-задача")
+        tg = reg.new_game("-100500", "s1", Initiator.from_web("bob"), "telegram-задача")
+        await reg.save_game(web)
+        await reg.save_game(tg)
+        await reg.delete_game("web", "s1")
+        assert await reg.get_game("web", "s1") is None
+        assert await reg.get_game("-100500", "s1") is not None
+        await reg.close()
