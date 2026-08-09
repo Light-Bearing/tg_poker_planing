@@ -1,5 +1,6 @@
 // web/static/adf-parser.js
-// PP Jira ADF & Wiki Parser — converts Jira descriptions to HTML
+// PP Jira ADF Parser — converts Jira ADF descriptions to HTML.
+// Wiki-разметкой занимается отдельный файл wiki-parser.js.
 
 (function () {
     'use strict';

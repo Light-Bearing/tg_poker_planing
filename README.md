@@ -391,6 +391,10 @@ python3 -m pytest tests/test_game.py -v
 
 # Конкретный тест
 python3 -m pytest tests/test_game.py::test_game_create -v
+
+# Тесты JavaScript (парсеры описаний Jira), нужен Node.js
+# кавычки обязательны: аргумент-каталог не работает
+node --test 'tests/js/*.test.js'
 ```
 
 ### Pre-commit hooks
