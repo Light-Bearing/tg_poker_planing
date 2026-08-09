@@ -13,6 +13,11 @@ repos:
         args: [--ignore-missing-imports, --python-version=3.10]
         additional_dependencies: [types-requests]
 
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
   - repo: local
     hooks:
       - id: pytest
