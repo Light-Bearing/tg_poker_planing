@@ -548,6 +548,19 @@ class TestUsernameValidation:
         assert r.status_code == 400
         assert r.json()["error"] == NAME_ERROR
 
+    def test_restart_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/restart", json={"username": BAD_NAME})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_reveal_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/reveal", json={"username": BAD_NAME})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+        assert client.get(f"/api/sessions/{created['session_id']}").json()["revealed"] is False
+
     def test_kick_rejects_bad_target_username(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
         r = client.post(
