@@ -506,6 +506,7 @@ code {
 .jira-panel {
     margin: 10px 0; padding: 10px 14px; border-radius: 4px;
     border-left: 4px solid; display: flex; align-items: flex-start; gap: 8px;
+    flex-wrap: wrap;
     font-size: 0.95em; line-height: 1.5;
 }
 .jira-panel-icon { flex-shrink: 0; font-size: 1.1em; line-height: 1.4; }
@@ -515,7 +516,7 @@ code {
 .jira-panel-warning { background: rgba(239, 71, 111, 0.08); border-color: var(--danger); }
 .jira-panel-success { background: rgba(6, 214, 160, 0.08); border-color: var(--success); }
 .jira-panel-error { background: rgba(239, 71, 111, 0.12); border-color: var(--danger); }
-.jira-panel-title { font-weight: 600; margin-bottom: 4px; font-size: 0.95em; }
+.jira-panel-title { font-weight: 600; margin-bottom: 4px; font-size: 0.95em; width: 100%; }
 
 .session-id-copy {
     cursor: pointer;
