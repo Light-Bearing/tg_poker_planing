@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { describeJiraError } = require('../../browser-extension/background.js');
+const { describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES } = require('../../browser-extension/background.js');
 
 test('JSON с errorMessages: код ответа впереди, сообщения через точку с запятой', () => {
     const body = JSON.stringify({ errorMessages: ['Issue does not exist', 'Try again'], errors: {} });
@@ -66,12 +66,70 @@ test('длинное тело с пробелами: сначала схлопы
     assert.strictEqual(result.length, 'HTTP 500: '.length + 300);
 });
 
+test('длинный message из JSON тоже обрезается и схлопывается', () => {
+    const body = JSON.stringify({ message: 'M'.repeat(5000) });
+    const result = describeJiraError(500, body);
+    assert.strictEqual(result.length, 'HTTP 500: '.length + 300);
+
+    const multiline = JSON.stringify({ errorMessages: ['строка\n\nвторая   строка'] });
+    assert.strictEqual(describeJiraError(400, multiline), 'HTTP 400: строка вторая строка');
+});
+
 test('JSON без знакомых полей: показываем сам текст, а не голый код', () => {
     assert.strictEqual(describeJiraError(400, '{"foo":1}'), 'HTTP 400: {"foo":1}');
 });
 
 test('не-JSON текстовое тело показывается как есть', () => {
     assert.strictEqual(describeJiraError(413, 'Request Entity Too Large'), 'HTTP 413: Request Entity Too Large');
+});
+
+// --- маскировка токена в диагностическом выводе ---
+
+const TOKEN = 'NjAwMDU3NTYzODk5OjaBcDeFgHiJkLmN';
+
+test('токен на границе обрезки не просачивается: маскируем до среза, а не после', () => {
+    // Ровно тот случай, на котором ревью сломало прежний порядок: тело echo-нуло заголовки
+    const body = 'x'.repeat(160) + ' Bearer ' + TOKEN + ' и ещё хвост';
+    const result = safeSnippet(body, TOKEN);
+
+    assert.ok(!result.includes(TOKEN), 'токен целиком не должен быть в выводе');
+    // И ни один его кусок длиннее восьми символов — обрезка не должна оставлять начало
+    for (let len = 8; len <= TOKEN.length; len++) {
+        assert.ok(!result.includes(TOKEN.slice(0, len)), `в выводе осталось начало токена (${len} симв.)`);
+    }
+    assert.ok(result.includes('***'), 'на месте токена должна быть маска');
+    assert.ok(result.length <= 200, 'обрезка до 200 символов должна сохраниться');
+});
+
+test('маскируются все вхождения токена, пробелы схлопываются', () => {
+    const result = safeSnippet(`a ${TOKEN}\n\nb ${TOKEN} c`, TOKEN);
+    assert.strictEqual(result, 'a *** b *** c');
+});
+
+test('короткий или пустой токен не превращает вывод в решето', () => {
+    assert.strictEqual(stripToken('текст с a внутри', 'a'), 'текст с a внутри');
+    assert.strictEqual(stripToken('текст', ''), 'текст');
+    assert.strictEqual(stripToken('текст', undefined), 'текст');
+});
+
+test('ни одна проба диагностики не может ничего записать в Jira', () => {
+    assert.strictEqual(DIAGNOSE_PROBES.length, 4);
+
+    const put = DIAGNOSE_PROBES.find(p => p.method === 'PUT');
+    // Пустой fields Jira отвергнет, даже если задача существует
+    assert.deepStrictEqual(put.payload, { fields: {} });
+
+    const posts = DIAGNOSE_PROBES.filter(p => p.method === 'POST');
+    assert.strictEqual(posts.length, 1);
+    // POST только на поиск: писать физически не может
+    assert.strictEqual(posts[0].path, '/rest/api/2/search');
+    assert.strictEqual(posts[0].payload.maxResults, 0);
+
+    // Ни одна проба не создаёт комментарий и не трогает изменяющие ручки
+    for (const probe of DIAGNOSE_PROBES) {
+        assert.ok(!probe.path.includes('/comment'), `проба ${probe.step} пишет комментарий`);
+        assert.ok(!probe.path.includes('/transitions'), `проба ${probe.step} меняет статус`);
+    }
 });
 
 test('r.json() на ошибочном ответе не вызывается — в коде остались только r.text()', () => {

@@ -27,6 +27,10 @@ function describeJiraError(status, text) {
     // и для не-JSON (страница nginx длинная и с переводами строк), и для JSON без знакомых полей.
     const plain = raw.replace(/\s+/g, ' ').trim().slice(0, 300);
 
+    // Схлопывание и обрезка нужны и для разобранного JSON: {"message":"…5000 символов…"}
+    // иначе уедет целиком в тост
+    const tidy = s => String(s).replace(/\s+/g, ' ').trim().slice(0, 300);
+
     let detail = '';
     try {
         const body = JSON.parse(raw);
@@ -45,7 +49,7 @@ function describeJiraError(status, text) {
         // Не JSON — покажем сам текст
     }
 
-    return `${prefix}: ${detail || plain}`;
+    return `${prefix}: ${detail ? tidy(detail) : plain}`;
 }
 
 // Читает тело ошибочного ответа и формирует сообщение.
@@ -58,23 +62,35 @@ function jiraErrorFromResponse(r) {
     );
 }
 
-// Четыре пробы диагностики. Пробы 3 и 4 идут на заведомо несуществующую задачу:
-// ключ выбран так, чтобы такой задачи не было, изменить ничего нельзя.
-// Смысл: если PUT доходит до Jira, она ответит 404 (задача не найдена) — значит метод
-// и авторизация в порядке, а причина в правах или в поле. Если вернётся 403 или
-// HTML-страница — запрос режет nginx/WAF или срабатывает XSRF, до Jira он не доходит.
-// Отдельная проба POST нужна, чтобы отличить «режут PUT» от «режут любой изменяющий метод».
+// Четыре пробы диагностики. Ни одна ничего не меняет в Jira.
+// Проба 3 — PUT на заведомо несуществующую задачу с пустым набором полей: даже если такая
+// задача найдётся, Jira отвергнет пустой fields и ничего не изменит. Смысл: если PUT
+// доходит до Jira, она ответит 404 (задача не найдена) — значит метод и авторизация в
+// порядке, а причина в правах или в поле. Если вернётся 403 или HTML-страница — запрос
+// режет nginx/WAF или срабатывает XSRF, до Jira он не доходит.
+// Проба 4 — POST поиска: проверяет ровно то же для метода POST (проходит ли через прокси
+// POST с JSON-телом), но писать не может физически. Это отличает «режут PUT» от
+// «режут любой изменяющий метод».
 const DIAGNOSE_PROBES = [
     { step: 1, method: 'GET', path: '/rest/api/2/myself', payload: null },
     { step: 2, method: 'GET', path: '/rest/api/2/field', payload: null },
     { step: 3, method: 'PUT', path: '/rest/api/2/issue/ZZZZ-99999', payload: { fields: {} } },
-    { step: 4, method: 'POST', path: '/rest/api/2/issue/ZZZZ-99999/comment', payload: { body: 'ping' } },
+    { step: 4, method: 'POST', path: '/rest/api/2/search', payload: { jql: 'issuekey = ZZZZ-99999', maxResults: 0 } },
 ];
 
-// Страховка: токен не должен попасть в диагностический вывод ни при каких обстоятельствах
+// Заголовки ответа, по которым видно, кто ответил — Jira или прокси перед ней
+const DIAGNOSE_HEADERS = ['Server', 'X-Seraph-LoginReason', 'X-Authentication-Denied-Reason', 'X-AUSERNAME'];
+
+// Страховка: токен не должен попасть в диагностический вывод ни при каких обстоятельствах.
+// Вызывать до обрезки: иначе разрез может прийтись на середину токена и оставить его начало.
 function stripToken(text, token) {
-    if (!token || token.length < 8) return text;
+    if (!token || token.length < 8) return String(text);
     return String(text).split(token).join('***');
+}
+
+// Маскируем токен, и только потом режем — порядок важен
+function safeSnippet(text, token, limit = 200) {
+    return stripToken(text, token).replace(/\s+/g, ' ').trim().slice(0, limit);
 }
 
 // Выполняет все четыре пробы подряд. Пробы 3 и 4 выполняются всегда, даже если 1 и 2
@@ -83,7 +99,10 @@ async function runDiagnostics(jiraUrl, jiraToken) {
     const results = [];
     for (const probe of DIAGNOSE_PROBES) {
         const url = `${jiraUrl}${probe.path}`;
-        const result = { step: probe.step, method: probe.method, url, status: 0, ok: false, body: '' };
+        const result = {
+            step: probe.step, method: probe.method, url,
+            status: 0, ok: false, body: '', headers: {},
+        };
         try {
             const init = {
                 method: probe.method,
@@ -98,12 +117,17 @@ async function runDiagnostics(jiraUrl, jiraToken) {
             const text = await r.text().catch(() => '');
             result.status = r.status;
             result.ok = r.ok;
-            result.body = text.replace(/\s+/g, ' ').trim().slice(0, 200);
+            result.body = safeSnippet(text, jiraToken);
+            // Заголовки читаются целиком: фоновый запрос идёт с host permissions.
+            // При 403 именно они отвечают на главный вопрос — ответила Jira или прокси.
+            for (const name of DIAGNOSE_HEADERS) {
+                const value = r.headers.get(name);
+                if (value) result.headers[name] = safeSnippet(value, jiraToken);
+            }
         } catch (err) {
             // Сети нет, CORS, обрыв — код ответа остаётся 0, это тоже результат
-            result.body = friendlyError(err).slice(0, 200);
+            result.body = safeSnippet(friendlyError(err), jiraToken);
         }
-        result.body = stripToken(result.body, jiraToken);
         results.push(result);
     }
     return results;
@@ -238,5 +262,5 @@ if (runtime) {
 
 // Экспорт для юнит-тестов: в браузере module не определён, ветка не выполняется
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { describeJiraError };
+    module.exports = { describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES };
 }
