@@ -7,7 +7,7 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import SCALES, Initiator
-from web_api import enrich_session_response, process_web_vote
+from web_api import enrich_session_response, process_web_vote, validate_username
 
 
 async def check_auto_reveal(session_id: str, game):
@@ -115,8 +115,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     msg = json.loads(data)
                     msg_type = msg.get("type")
                     if msg_type == "join":
-                        username = msg.get("username")
-                        if username:
+                        username = validate_username(msg.get("username", ""))
+                        if not username:
+                            await websocket.send_json(
+                                {"type": "error", "message": "Недопустимое имя участника"}
+                            )
+                        else:
                             is_new = manager.register_user(session_id, username)
                             manager.register_ws_connection(session_id, username, websocket)
                             if game:
