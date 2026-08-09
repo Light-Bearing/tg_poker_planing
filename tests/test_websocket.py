@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -617,6 +618,22 @@ class TestWebSocketEndpoint:
         updated = await state.storage.get_game("web", "test-session")
         assert updated.initiator.id == "web_bob"
 
+    @pytest.mark.asyncio
+    async def test_join_rejects_invalid_username(self, ws):
+        """WebSocket join with an invalid/dangerous username is rejected and never registered."""
+        bad_name = "<img src=x onerror=alert(1)>"
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": bad_name}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        error_calls = [call for call in ws.send_json.await_args_list if call.args[0].get("type") == "error"]
+        assert len(error_calls) >= 1
+        assert error_calls[0].args[0]["message"] == "Недопустимое имя участника"
+
+        assert manager.session_users.get("test-session", {}) == {}
+
 
 class TestCheckAutoReveal:
     @pytest.mark.asyncio
@@ -764,3 +781,26 @@ class TestWebSocketVoteValidation:
         message = error_calls[0].args[0].get("message", "")
         assert "99" in message
         assert "fibonacci" in message
+
+    @pytest.mark.asyncio
+    async def test_websocket_vote_rejects_invalid_username(self, ws):
+        """WebSocket vote with an invalid/dangerous username is rejected and never stored."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+
+        bad_name = "<img src=x onerror=alert(1)>"
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "vote", "username": bad_name, "point": "5"}),
+            WebSocketDisconnect(),
+        ]
+        ws.send_json.reset_mock()
+        await websocket_endpoint(ws)
+
+        error_calls = [call for call in ws.send_json.await_args_list if call.args[0].get("type") == "error"]
+        assert len(error_calls) >= 1
+        assert error_calls[0].args[0]["message"] == "Недопустимое имя участника"
+
+        stored_game = await state.storage.get_game("web", "test-session")
+        assert stored_game.votes == {}
