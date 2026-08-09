@@ -1,14 +1,21 @@
 // web/static/adf-parser.js
-// PP Jira ADF & Wiki Parser — converts Jira descriptions to HTML
+// PP Jira ADF Parser — converts Jira ADF descriptions to HTML.
+// Wiki-разметкой занимается отдельный файл wiki-parser.js.
 
 (function () {
     'use strict';
 
     // ========== UTILITY ==========
+    // Чистая реализация: не требует DOM (нужно для запуска в Node) и, в отличие
+    // от прежней через createElement, экранирует кавычки — результат подставляется
+    // в том числе в значения атрибутов.
     function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // ========== TEXT MARKS ==========
@@ -164,100 +171,30 @@
         }
     }
 
-    // ========== WIKI → HTML ==========
-    function parseWikiMarkup(text) {
-        if (!text) return '';
-
-        let html = text;
-
-        html = escapeHtml(html);
-
-        html = html.replace(/\{code\}([\s\S]*?)\{code\}/g, '<pre class="jira-code"><code>$1</code></pre>');
-
-        html = html.replace(/\{noformat\}([\s\S]*?)\{noformat\}/g, '<pre class="jira-code"><code>$1</code></pre>');
-
-        html = html.replace(/\{quote\}([\s\S]*?)\{quote\}/g, '<blockquote>$1</blockquote>');
-
-        // {color:red}text{color} — цветной текст
-        html = html.replace(/\{color(?::([^}]+))?\}([\s\S]*?)\{color\}/g, (_, color, content) => {
-            const rawColor = color ? color.trim() : 'inherit';
-            // Валидация: только CSS-совместимые названия цветов и hex-коды
-            const col = /^(inherit|initial|revert|unset|[a-z]+|#[\da-f]{3,8})$/i.test(rawColor)
-                ? rawColor : 'inherit';
-            const escaped = escapeHtml(content);
-            return `<span style="color:${col}">${escaped}</span>`;
-        });
-
-        // {panel}text{panel} или {panel:title=X}text{panel} — информационные панели
-        html = html.replace(/\{panel(?::title=([^}]+))?\}([\s\S]*?)\{panel\}/g, (_, title, content) => {
-            const titleHtml = title ? `<div class="jira-panel-title">${escapeHtml(title.trim())}</div>` : '';
-            return `<div class="jira-panel jira-panel-info">${titleHtml}<div class="jira-panel-content">${escapeHtml(content.trim())}</div></div>`;
-        });
-
-        html = html.replace(/^h([1-6])\.\s+(.*)$/gm, (_, level, title) => `<h${level}>${title}</h${level}>`);
-
-        html = html.replace(/^\|\|(.+)\|\|$/gm, (_, row) => {
-            const cells = row.split('||').map(c => c.trim()).filter(Boolean);
-            const tag = cells.length > 0 && row.trim().startsWith('||') && row.trim().endsWith('||') ? 'th' : 'td';
-            const cellTag = tag;
-            return `<tr>${cells.map(c => `<${cellTag}>${c}</${cellTag}>`).join('')}</tr>`;
-        });
-        html = html.replace(/((?:<tr>.*?<\/tr>\n?)+)/g, '<table class="jira-table"><tbody>$1</tbody></table>');
-
-        html = html.replace(/^(#+)\s+(.*)$/gm, (_, level, item) => {
-            const nest = level.length - 1;
-            return `${'  '.repeat(nest)}<li>${item}</li>`;
-        });
-        html = html.replace(/((?:^|\n)\s*<li>.*?\n?)+/g, (match) => {
-            const items = match.trim().split('\n').map(l => l.trim()).join('\n');
-            return `\n<ol>${items.replace(/<li>/g, '\n<li>')}\n</ol>\n`;
-        });
-
-        html = html.replace(/^(\s*)[*-]\s+(.*)$/gm, (_, spaces, item) => `<li>${item}</li>`);
-        html = html.replace(/(?:^|\n)((?:<li>.*?<\/li>(?:\n|$))+)/g, '\n<ul>$1</ul>\n');
-
-        html = html.replace(/\{\{(.+?)\}\}/g, '<code>$1</code>');
-        html = html.replace(/-([\S\x20]+?)-/g, function(match, text, offset) {
-            if (match.startsWith('[') || match.endsWith(']')) return match;
-            if (/[\/()]/.test(text) || /^https?/.test(text)) return match;
-            var before = html.substring(0, offset);
-            var openBrackets = (before.match(/\[/g) || []).length;
-            var closeBrackets = (before.match(/\]/g) || []).length;
-            if (openBrackets > closeBrackets) return match;
-            return '<s>' + text + '</s>';
-        });
-        html = html.replace(/\+(.+?)\+/g, '<u>$1</u>');
-        html = html.replace(/\^(.+?)\^/g, '<sup>$1</sup>');
-        html = html.replace(/~(.+?)~/g, '<sub>$1</sub>');
-        html = html.replace(/\*(\S[\s\S]*?\S)\*/g, '<strong>$1</strong>');
-        html = html.replace(/_(\S[\s\S]*?\S)_/g, '<em>$1</em>');
-
-        html = html.replace(/\[([^|]+?)\|([^\]\n]+?)\]/g, (_, text, url) => {
-            const href = url.match(/^https?:\/\//) ? url : `https://${url}`;
-            return `<a href="${escapeHtml(href)}" target="_blank" class="jira-desc-link">${text.trim()}</a>`;
-        });
-
-        html = html.replace(/\[([A-Z]{2,6}-\d+)\]/g, '<span class="jira-task-ref">$1</span>');
-        html = html.replace(/\b([A-Z]{2,6}-\d+)\b/g, '<span class="jira-task-ref">$1</span>');
-
-        html = html.replace(/(^|[\s(\[,;:>!?])(https?:\/\/[^\s<>\])"]+)/g, (_, before, url) =>
-            `${before}<a href="${escapeHtml(url)}" target="_blank" class="jira-desc-link">${url}</a>`
-        );
-
-        html = html.replace(/\n/g, '<br>');
-
-        return html;
-    }
-
     // ========== ENTRY POINT ==========
-    window.parseJiraDescription = function parseJiraDescription(desc) {
+    function parseJiraDescription(desc) {
         if (!desc) return '';
         if (typeof desc === 'object' && desc !== null && desc.type === 'doc') {
             return adfToHtml(desc);
         }
         if (typeof desc === 'string') {
-            return parseWikiMarkup(desc);
+            const wiki = (typeof module !== 'undefined' && module.exports)
+                ? require('./wiki-parser.js').parseJiraWiki
+                : (typeof window !== 'undefined' ? window.parseJiraWiki : null);
+            // Если wiki-parser.js не подключён, отдаём экранированный текст,
+            // а не падаем: описание задачи важнее разметки.
+            return wiki ? wiki(desc) : escapeHtml(desc);
         }
         return escapeHtml(String(desc));
-    };
+    }
+
+    if (typeof window !== 'undefined') {
+        window.parseJiraDescription = parseJiraDescription;
+    }
+
+    // Файл работает и как обычный <script> на странице, и как модуль в Node —
+    // это нужно, чтобы парсер можно было тестировать без браузера и без сборщика.
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { parseJiraDescription, escapeHtml };
+    }
 })();
