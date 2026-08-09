@@ -76,7 +76,7 @@ TELEGRAM_BOT_TOKEN=ваш_токен_бота_от_BotFather
 # Опциональные переменные
 PP_BOT_DB_PATH=/tmp/tg_pp_bot.db # Путь к базе данных
 PROXY_URL=http://proxy:port # Прокси для Telegram (опционально)
-RENDER_EXTERNAL_URL=ваш_домен # Для webhook режима (опционально)
+WEBHOOK_URL=https://your-domain.com # Для webhook режима (опционально)
 PORT=8000 # Port для веб-сервера (default: 8000)
 ```
 
