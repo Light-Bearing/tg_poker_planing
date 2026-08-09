@@ -2250,6 +2250,9 @@ function connectWebSocket(sessionId) {
                 // НЕ показываем уведомление о выходе - это может быть временный разрыв
                 // soundManager.playLeave();
                 updateSessionDisplay(message.data);
+            } else if (message.type === 'error') {
+                toast.error(message.message || 'Ошибка сервера', 'ОШИБКА');
+                return;
             } else if (message.type === 'kicked') {
                 toast.error(message.message || 'Вы были исключены из комнаты', 'ИСКЛЮЧЕНИЕ');
                 setTimeout(() => leaveSession(), 2000);
