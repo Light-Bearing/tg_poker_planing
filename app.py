@@ -55,8 +55,12 @@ async def session_cleanup_loop(interval: float) -> None:
 
     while True:
         await asyncio.sleep(interval)
-        manager.cleanup_old_sessions()
-        evict_stale_rate_limits()
+        try:
+            manager.cleanup_old_sessions()
+            evict_stale_rate_limits()
+        except Exception:
+            # Один сбойный тик не должен останавливать уборку навсегда.
+            logger.exception("Session cleanup tick failed")
 
 
 async def build_app():

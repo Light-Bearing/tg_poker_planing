@@ -99,3 +99,31 @@ class TestCleanupLoop:
         asyncio.run(scenario())
 
         assert "live" in manager.session_users
+
+    def test_loop_survives_failing_tick(self):
+        """Сбой в одном тике не должен останавливать цикл очистки навсегда."""
+        import asyncio
+        from unittest.mock import patch
+
+        from app import session_cleanup_loop
+
+        calls = []
+
+        def flaky_cleanup():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+
+        async def scenario():
+            with patch.object(manager, "cleanup_old_sessions", side_effect=flaky_cleanup):
+                task = asyncio.create_task(session_cleanup_loop(0.01))
+                await asyncio.sleep(0.05)
+
+                assert not task.done()
+                assert len(calls) > 1
+
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())
