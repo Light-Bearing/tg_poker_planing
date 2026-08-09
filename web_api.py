@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
-from ppbot.game import AVAILABLE_POINTS, DEFAULT_SCALE, SCALE_NAMES, SCALES, Game, Initiator
+from ppbot.game import AVAILABLE_POINTS, SCALE_NAMES, SCALES, Game, Initiator
 
 # ========== SIMPLE RATE LIMITER ==========
 _rate_limit_store: dict[str, list[float]] = {}
@@ -208,7 +208,13 @@ async def api_set_scale(request: Request):
         if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can change scale"}, status_code=403)
 
-        game.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
+        # Опечатка в scale_name не должна молча приводить к сбросу всех голосов.
+        if scale_name not in SCALES:
+            return JSONResponse(
+                {"error": f"Unknown scale_name '{scale_name}'. Available: {', '.join(SCALES)}"}, status_code=400
+            )
+
+        game.scale_name = scale_name
         # Голоса по старой шкале в новой могут отсутствовать — сбрасываем,
         # иначе среднее считается по значениям, которые нельзя переголосовать.
         game.restart()

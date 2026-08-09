@@ -282,14 +282,19 @@ class TestScale:
         resp = client.post("/api/sessions/nonexistent/scale", json={"username": "Alice", "scale_name": "fibonacci"})
         assert resp.status_code == 404
 
-    def test_set_scale_invalid_falls_back_to_default(self, client):
+    def test_set_scale_unknown_name_rejected(self, client):
+        """Опечатка в scale_name должна быть ошибкой, а не молчаливым сбросом голосов."""
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
+        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
 
         resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "bogus"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["scale_name"] == "custom"
+        assert resp.status_code == 400
+        assert "bogus" in resp.json()["error"]
+
+        after = client.get(f"/api/sessions/{session_id}").json()
+        assert after["scale_name"] == "custom", "шкала не должна меняться"
+        assert after["vote_count"] == 1, "голоса не должны сбрасываться при опечатке"
 
 
 class TestCustomScale:
