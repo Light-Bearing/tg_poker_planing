@@ -290,6 +290,53 @@
         return result;
     }
 
+    // Если в позиции i начинается конструкция, внутрь которой блочному слою
+    // заходить нельзя ([ссылка] или {{моноширинный}}), возвращает индекс сразу
+    // за её концом; иначе -1. Границы ищутся ровно так же, как их найдёт
+    // parseInline (ближайший закрыватель), поэтому слои не расходятся во
+    // мнении о том, где кончается ссылка. Скобка без пары ничего не
+    // защищает — для parseInline это обычный символ, и здесь тоже.
+    function protectedSpanEnd(text, i) {
+        if (text[i] === '[') {
+            const end = text.indexOf(']', i + 1);
+            return end === -1 ? -1 : end + 1;
+        }
+        if (text.startsWith('{{', i)) {
+            const end = text.indexOf('}}', i + 2);
+            return end === -1 ? -1 : end + 2;
+        }
+        return -1;
+    }
+
+    // Режет строку таблицы на ячейки по разделителю, пропуская разделители
+    // внутри защищённых конструкций. Без этого блочный слой разрезал бы
+    // [Дока|https://...] на две ячейки раньше, чем инлайновый разбор вообще
+    // увидит ссылку, — ровно та поломка «правило не знает, на что смотрит»,
+    // ради устранения которой переписан парсер.
+    function splitTableCells(content, sep) {
+        const cells = [];
+        let buf = '';
+        let i = 0;
+        while (i < content.length) {
+            const skipTo = protectedSpanEnd(content, i);
+            if (skipTo !== -1) {
+                buf += content.slice(i, skipTo);
+                i = skipTo;
+                continue;
+            }
+            if (content.startsWith(sep, i)) {
+                cells.push(buf);
+                buf = '';
+                i += sep.length;
+                continue;
+            }
+            buf += content[i];
+            i += 1;
+        }
+        cells.push(buf);
+        return cells;
+    }
+
     // Разбирает одну строку таблицы. Если строка начинается с `||` — это
     // заголовочная строка, ячейки разделены `||`; иначе обычная строка,
     // ячейки разделены одиночным `|`. Обрамляющие разделители (по одному
@@ -301,7 +348,7 @@
         let content = line;
         if (content.startsWith(sep)) content = content.slice(sep.length);
         if (content.endsWith(sep)) content = content.slice(0, -sep.length);
-        const cells = content.split(sep).map(function (cell) { return cell.trim(); });
+        const cells = splitTableCells(content, sep).map(function (cell) { return cell.trim(); });
         return { header: header, cells: cells };
     }
 

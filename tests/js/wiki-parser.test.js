@@ -232,6 +232,28 @@ test('таблица без заголовочной строки', () => {
     assert.ok(!/<th>/.test(html));
 });
 
+test('ссылка внутри ячейки данных остаётся одной ячейкой', () => {
+    const rows = parseBlocks('||Что||Где||\n|Спека|[Дока|https://wiki.corp/api_v2_spec]|')[0].rows;
+    assert.deepStrictEqual(rows[1].cells, ['Спека', '[Дока|https://wiki.corp/api_v2_spec]']);
+
+    const html = parseJiraWiki('||Что||Где||\n|Спека|[Дока|https://wiki.corp/api_v2_spec]|');
+    assert.match(html, /<td>Спека<\/td><td><a href="https:\/\/wiki\.corp\/api_v2_spec"[^>]*>Дока<\/a><\/td>/);
+});
+
+test('ссылка внутри заголовочной ячейки остаётся одной ячейкой', () => {
+    const rows = parseBlocks('||Что||[Дока|https://wiki.corp/api_v2_spec]||')[0].rows;
+    assert.deepStrictEqual(rows[0].cells, ['Что', '[Дока|https://wiki.corp/api_v2_spec]']);
+
+    const html = parseJiraWiki('||Что||[Дока|https://wiki.corp/api_v2_spec]||');
+    assert.match(html, /<th>Что<\/th><th><a href="https:\/\/wiki\.corp\/api_v2_spec"[^>]*>Дока<\/a><\/th>/);
+});
+
+test('моноширинный с вертикальной чертой внутри ячейки не разрезается', () => {
+    const rows = parseBlocks('|{{a|b}}|второй|')[0].rows;
+    assert.deepStrictEqual(rows[0].cells, ['{{a|b}}', 'второй']);
+    assert.match(parseJiraWiki('|{{a|b}}|второй|'), /<td><code>a\|b<\/code><\/td><td>второй<\/td>/);
+});
+
 // --- регрессии на найденные поломки ---
 
 test('регрессия: идентификатор с подчёркиваниями цел', () => {
