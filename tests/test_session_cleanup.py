@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import state
+from config import WEB_CHAT_ID
 from connection import manager
+from ppbot.game import GameRegistry, Initiator
 
 
 def _fake_ws():
@@ -125,6 +128,77 @@ class TestOrphanTracking:
         manager.disconnect("s1", ws)
         asyncio.run(manager.cleanup_session("s1"))
         assert "s1" not in manager._orphaned_at
+
+
+class TestPurgeExpired:
+    @pytest.fixture
+    async def storage(self, tmp_path):
+        """Поднимает GameRegistry на временной БД и подсовывает его в state.storage."""
+        registry = GameRegistry()
+        await registry.init_db(str(tmp_path / "purge.db"))
+        previous, state.storage = state.storage, registry
+        yield registry
+        await registry.close()
+        state.storage = previous
+
+    @pytest.mark.asyncio
+    async def test_созревшая_веб_сессия_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time() - 600
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is None
+
+    @pytest.mark.asyncio
+    async def test_свежая_осиротевшая_не_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time()
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_сессия_с_подключением_не_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time() - 600
+        manager.active_connections["s1"] = [_fake_ws()]
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_телеграм_игра_не_удаляется(self, storage):
+        """У игр из Telegram нет WebSocket вообще — правило «нет подключений» их не касается."""
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game("-100500", "s1", Initiator.from_web("bob"), "telegram-задача"))
+        manager._orphaned_at["s1"] = time.time() - 600
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game("-100500", "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_память_о_сессии_очищается(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager.register_user("s1", "alice")
+        manager._orphaned_at["s1"] = time.time() - 600
+
+        await purge_expired_sessions()
+
+        assert "s1" not in manager._orphaned_at
+        assert "s1" not in manager.session_users
 
 
 class TestCleanupLoop:
