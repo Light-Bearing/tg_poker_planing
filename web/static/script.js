@@ -1437,6 +1437,32 @@ function onJoinScaleClick(scaleName) {
     renderScalePoints(scaleName);
 }
 
+function renderSessionScaleSelector(session) {
+    const container = document.getElementById('sessionScaleSelector');
+    const buttonsContainer = document.getElementById('sessionScaleSelectorButtons');
+    if (!container || !buttonsContainer) return;
+
+    const scaleNames = session.scale_names || SERVER_SCALE_NAMES || {};
+    let entries = Object.entries(scaleNames);
+    if (entries.length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    // Сортируем: custom — в конец (как на экране входа)
+    entries.sort((a, b) => {
+        if (a[0] === 'custom') return 1;
+        if (b[0] === 'custom') return -1;
+        return 0;
+    });
+
+    container.style.display = 'flex';
+    buttonsContainer.innerHTML = entries.map(([key, label]) => {
+        const active = key === session.scale_name ? 'active' : '';
+        return `<button class="scale-btn ${active}" data-scale="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+    }).join('');
+}
+
 // ==================== CUSTOM SCALE EDITOR ====================
 let customScaleBuffer = [];
 
@@ -1898,6 +1924,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const sessionScaleButtons = document.getElementById('sessionScaleSelectorButtons');
+    if (sessionScaleButtons) {
+        sessionScaleButtons.addEventListener('click', (e) => {
+            const btn = e.target.closest('.scale-btn');
+            if (btn) setScale(btn.dataset.scale);
+        });
+    }
+
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
     if (state.soundEnabled) {
         // AudioContext создается при первом клике пользователя (требование браузеров)
@@ -2259,8 +2293,13 @@ function updateConnectionStatus(status) {
 }
 
 function setScale(scaleName) {
+    if (!state.isInitiator) return;
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({ type: 'set_scale', scale_name: scaleName }));
+        state.ws.send(JSON.stringify({
+            type: 'set_scale',
+            scale_name: scaleName,
+            username: state.username
+        }));
     }
 }
 
@@ -2452,7 +2491,8 @@ function updateSessionDisplay(session) {
     
     const controlCard = document.getElementById('initiatorControlCard');
     controlCard.style.display = state.isInitiator ? 'block' : 'none';
-    
+    if (state.isInitiator) renderSessionScaleSelector(session);
+
     const votingSection = document.getElementById('votingSection');
     votingSection.style.opacity = session.revealed ? '0.4' : '1';
     votingSection.style.pointerEvents = session.revealed ? 'none' : 'auto';

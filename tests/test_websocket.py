@@ -847,3 +847,46 @@ class TestWebSocketFreshGame:
         assert "web_bob" in saved.votes, "голос Боба затёрт устаревшим объектом игры"
         assert "web_alice" in saved.votes
         assert saved.votes["web_bob"].point == "5"
+
+
+class TestWebSocketSetScale:
+    @pytest.mark.asyncio
+    async def test_set_scale_by_initiator_applies_and_resets_votes(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+        manager.update_user_vote("test-session", "alice", {"point": "5"})
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "tshirt", "username": "alice"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "tshirt"
+        assert dict(saved.votes) == {}
+        assert saved.revealed is False
+        assert manager.session_users["test-session"]["alice"]["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_set_scale_by_non_initiator_returns_error(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "bob")
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "tshirt", "username": "bob"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c[0][0].get("type") == "error"]
+        assert errors, "не-инициатор должен получить сообщение об ошибке"
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "custom"
