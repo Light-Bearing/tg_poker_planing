@@ -1,6 +1,6 @@
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 import state
-from config import CORS_ORIGINS, logger
+from config import CORS_ORIGINS, SESSION_CLEANUP_INTERVAL, logger
 from connection import manager
 from ppbot.game import GameRegistry
 from telegram_bot import init_bot, telegram_webhook
@@ -48,6 +48,13 @@ async def shutdown_app(app: Starlette) -> None:
     logger.info("Shutdown complete")
 
 
+async def session_cleanup_loop(interval: float) -> None:
+    """Периодически убирает из памяти сессии без активных подключений."""
+    while True:
+        await asyncio.sleep(interval)
+        manager.cleanup_old_sessions()
+
+
 async def build_app():
     state.storage = GameRegistry()
     state.templates = Jinja2Templates(directory="web/templates")
@@ -77,8 +84,14 @@ async def build_app():
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await shutdown_app(app)
+        cleanup_task = asyncio.create_task(session_cleanup_loop(SESSION_CLEANUP_INTERVAL))
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+            await shutdown_app(app)
 
     starlette_app = Starlette(
         routes=routes,
