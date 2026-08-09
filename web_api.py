@@ -64,7 +64,7 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
         if game.revealed:
             payload["real_point"] = vote.point
         votes.append(payload)
-    return {
+    response = {
         "session_id": session_id,
         "text": game.text,
         "initiator": game.initiator.username or game.initiator.id,
@@ -73,12 +73,16 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
         "revealed": game.revealed,
         "votes": votes,
         "vote_count": len(game.votes),
-        "average": game._calc_average(),
         "available_points": game.get_points(),
         "scale_name": game.scale_name,
         "scale_names": SCALE_NAMES,
         "auto_reveal": getattr(game, "auto_reveal", False),
     }
+    # Среднее значение отдаём только после вскрытия карт,
+    # чтобы не утекали данные через агрегат до вскрытия.
+    if game.revealed:
+        response["average"] = game._calc_average()
+    return response
 
 
 def enrich_session_response(game: Game, session_id: str) -> dict:

@@ -500,9 +500,12 @@ class TestVoteSecrecy:
 
         before = client.get(f"/api/sessions/{sid}").json()
         assert before["votes"], "голос должен быть записан"
-        assert all("real_point" not in v for v in before["votes"])
+        assert all("real_point" not in v for v in before["votes"]), "real_point must be hidden before reveal"
+        assert "average" not in before, "average must be hidden before reveal"
 
         client.post(f"/api/sessions/{sid}/reveal", json={"username": "alice"})
 
         after = client.get(f"/api/sessions/{sid}").json()
-        assert after["votes"][0]["real_point"] == "5"
+        assert after["votes"][0]["real_point"] == "5", "real_point must be present after reveal"
+        assert "average" in after, "average must be present after reveal"
+        assert after["average"] == 5.0, "average must equal the single vote"

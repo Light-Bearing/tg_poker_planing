@@ -405,6 +405,20 @@ class TestGameToWebResponse:
         assert "real_point" not in participant["vote"]
         manager.session_users.clear()
 
+    def test_average_hidden_until_reveal(self):
+        from ppbot.game import Game
+        from web_api import game_to_web_response
+
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "a"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "a"}, "5")
+        result = game_to_web_response(game, "s1")
+        assert "average" not in result, "average must be hidden before reveal"
+
+        game.revealed = True
+        result = game_to_web_response(game, "s1")
+        assert "average" in result, "average must be present after reveal"
+        assert result["average"] == 5.0
+
 
 class TestEnrichSessionResponse:
     def test_enrich_with_no_participants(self):
