@@ -202,12 +202,29 @@ function jiraAuth(token, extra = {}) {
     return { ...extra, 'Authorization': `Bearer ${token}` };
 }
 
+// Ответила ли Jira: у неё тело всегда JSON. HTML-страница — это прокси перед ней
+function looksLikeJira(result) {
+  if (!result.body) return false;
+  try {
+    JSON.parse(result.body);
+    return true;
+  } catch (_) {
+    // Тело обрезано до 200 символов, поэтому длинный JSON распарсить не удастся —
+    // но его начало всё равно опознаётся по первому символу
+    return /^[[{]/.test(result.body.trim());
+  }
+}
+
 // Короткая расшифровка результата пробы — чтобы владелец понял вывод без нас
 function explainProbe(result) {
   if (result.status === 0) return 'нет ответа: сеть, прокси или CORS';
   if (result.status === 401) return 'токен не принят';
   if (result.status === 403) return 'запрет: XSRF, права или фильтр перед Jira';
-  if (result.status === 404 && result.method !== 'GET') return 'запрос дошёл до Jira: задачи нет — это ожидаемо и хорошо';
+  if (result.status === 404 && result.method !== 'GET') {
+    return looksLikeJira(result)
+      ? 'запрос дошёл до Jira: задачи нет — это ожидаемо и хорошо'
+      : '404, но ответ не похож на Jira: тело не JSON, отвечает что-то по пути';
+  }
   if (result.status === 404) return 'адрес не найден: проверьте URL Jira';
   if (result.ok) return 'успех';
   return 'см. тело ответа';
@@ -215,7 +232,10 @@ function explainProbe(result) {
 
 // Диагностика: четыре пробы через background, результат текстом в <pre>
 async function runDiagnose() {
-  const jiraUrl = document.getElementById('jiraUrl').value.trim().replace(/\/+$/, '');
+  // Адрес берём ровно в том виде, в каком его использует отказавший путь: saveSettings
+  // делает только trim(), страница шлёт jiraSettings.jiraUrl как есть. Нормализуй мы тут
+  // слеш на конце — пробы пошли бы не по тому URL, и диагностика соврала бы зелёным.
+  const jiraUrl = document.getElementById('jiraUrl').value.trim();
   const jiraToken = document.getElementById('jiraToken').value.trim();
 
   if (!jiraUrl || !jiraToken) {
@@ -246,11 +266,15 @@ async function runDiagnose() {
     const code = r.status === 0 ? 'нет ответа' : `HTTP ${r.status}`;
     lines.push(`${r.step}. ${r.method} ${path}`);
     lines.push(`   ${code} — ${explainProbe(r)}`);
+    const headers = Object.entries(r.headers || {}).map(([k, v]) => `${k}: ${v}`);
+    lines.push(`   ${headers.length ? headers.join(' | ') : '(нужных заголовков нет)'}`);
     lines.push(`   ${r.body || '(пустое тело)'}`);
     lines.push('');
   });
-  lines.push('Пробы 3 и 4 идут на несуществующую задачу ZZZZ-99999 и ничего не меняют.');
-  lines.push('404 на них — хорошо: запись доходит до Jira. 403 или HTML — режут по пути.');
+  lines.push('Проба 3 — PUT на несуществующую задачу ZZZZ-99999 с пустым набором полей.');
+  lines.push('Проба 4 — поиск: POST с телом, писать не может. Ни одна ничего не меняет.');
+  lines.push('404 в пробе 3 — хорошо: запись доходит до Jira. 403 или HTML — режут по пути.');
+  lines.push('Строка заголовков говорит, кто ответил: Jira (X-AUSERNAME, X-Seraph-*) или прокси (Server).');
 
   outEl.textContent = lines.join('\n');
 }
