@@ -30,11 +30,12 @@ from websocket_handler import websocket_endpoint
 
 @pytest.fixture(autouse=True)
 def _setup_state(tmp_path):
-    state.storage = GameRegistry()
+    registry = GameRegistry()
+    state.storage = registry
     db_path = str(tmp_path / "test.db")
 
     async def _init():
-        await state.storage.init_db(db_path)
+        await registry.init_db(db_path)
 
     import asyncio
 
@@ -46,7 +47,7 @@ def _setup_state(tmp_path):
     yield
 
     async def _close():
-        await state.storage.close()
+        await registry.close()
 
     asyncio.run(_close())
 
