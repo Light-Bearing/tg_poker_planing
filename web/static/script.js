@@ -2342,6 +2342,60 @@ function toggleAutoReveal() {
     });
 }
 
+// ========== СОБСТВЕННЫЙ ВЫБОР (подсветка своей карты) ==========
+// До вскрытия сервер намеренно не отдаёт real_point (тайна голосования),
+// поэтому свой выбор помним на клиенте и переживаем перезагрузку страницы.
+function myVoteStorageKey() {
+    if (!state.sessionId || !state.username) return null;
+    return `pp_my_vote_${state.sessionId}_${state.username}`;
+}
+
+function rememberMyVote(point) {
+    state.selectedPoint = point || null;
+    const key = myVoteStorageKey();
+    if (!key) return;
+    try {
+        if (state.selectedPoint === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, state.selectedPoint);
+    } catch (e) {
+        // localStorage недоступен (приватный режим) — обходимся памятью
+    }
+}
+
+function readStoredVote() {
+    const key = myVoteStorageKey();
+    if (!key) return null;
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        return null;
+    }
+}
+
+function highlightSelectedCard() {
+    document.querySelectorAll('.point-btn').forEach(b => {
+        b.classList.toggle('selected', b.dataset.point === state.selectedPoint);
+    });
+}
+
+// Синхронизирует state.selectedPoint с состоянием сессии перед отрисовкой грида.
+function syncMyVoteFromSession(session) {
+    const myVote = (session.votes || []).find(v => v.user_id === `web_${state.username}`);
+    if (!myVote) {
+        // Голоса нет: рестарт раунда или смена шкалы — старая подсветка неверна.
+        rememberMyVote(null);
+    } else if (myVote.real_point) {
+        // Карты вскрыты — сервер отдал реальное значение, берём его как истину.
+        rememberMyVote(myVote.real_point);
+    } else if (state.selectedPoint === null) {
+        // Голос есть, но значение скрыто: восстанавливаем свой выбор из хранилища.
+        state.selectedPoint = readStoredVote();
+    }
+    if (state.selectedPoint !== null && !(session.available_points || []).includes(state.selectedPoint)) {
+        rememberMyVote(null);
+    }
+}
+
 function updateSessionDisplay(session) {
     state.isInitiator = (session.initiator_id === `web_${state.username}`);
 
@@ -2425,6 +2479,7 @@ function updateSessionDisplay(session) {
     document.getElementById('jiraBtn').classList.remove('hidden');
     updateJiraHeaderBtn();
     
+    syncMyVoteFromSession(session);
     const grid = document.getElementById('pointsGrid');
     grid.innerHTML = '';
     session.available_points.forEach(point => {
@@ -2433,15 +2488,10 @@ function updateSessionDisplay(session) {
         btn.textContent = point;
         btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
-        
-        const myVote = session.votes.find(v => v.user_id === `web_${state.username}`);
-        if (myVote && myVote.real_point === point) {
-            btn.classList.add('selected');
-            state.selectedPoint = point;
-        }
         grid.appendChild(btn);
     });
-    
+    highlightSelectedCard();
+
     document.getElementById('voteCount').textContent = session.vote_count;
     const averageCard = document.getElementById('averageCard');
     const resultCard = document.getElementById('resultCard');
@@ -2641,11 +2691,11 @@ function renderHistogram(session) {
 
 async function castVote(point) {
     if (!state.sessionId) return;
-    const btn = document.querySelector(`.point-btn[data-point="${point}"]`);
-    if (btn) {
-        document.querySelectorAll('.point-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-    }
+    const previousPoint = state.selectedPoint;
+    // Запоминаем выбор сразу: свой голос обратно не приходит (real_point скрыт
+    // до вскрытия), а грид перерисовывается на каждом broadcast.
+    rememberMyVote(point);
+    highlightSelectedCard();
     try {
         const response = await fetch(`/api/sessions/${state.sessionId}/vote`, {
             method: 'POST',
@@ -2655,13 +2705,15 @@ async function castVote(point) {
         if (!response.ok) {
             const err = await response.json();
             toast.error(err.error || 'Неизвестная ошибка', 'ОШИБКА ГОЛОСА');
-            if (btn) btn.classList.remove('selected');
+            rememberMyVote(previousPoint);
+            highlightSelectedCard();
         } else {
             soundManager.playVote();
         }
-    } catch (error) { 
+    } catch (error) {
         toast.error(error.message, 'НЕТ СВЯЗИ');
-        if (btn) btn.classList.remove('selected');
+        rememberMyVote(previousPoint);
+        highlightSelectedCard();
     }
 }
 
