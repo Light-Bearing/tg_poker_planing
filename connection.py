@@ -68,6 +68,16 @@ class ConnectionManager:
         if not self.active_connections.get(session_id):
             self._orphaned_at[session_id] = time.time()
 
+    def mark_orphaned_if_idle(self, session_id: str) -> None:
+        """Помечает сессию осиротевшей, если у неё нет подключений и метки.
+
+        Нужно для записей, которые не проходили цикл «подключился-отключился»
+        в текущем процессе: они пережили перезапуск или их сокет не открылся.
+        """
+        if self.active_connections.get(session_id):
+            return
+        self._orphaned_at.setdefault(session_id, time.time())
+
     def orphaned_web_sessions(self, ttl: float) -> list[str]:
         """Сессии без активных подключений, осиротевшие дольше ttl секунд."""
         now = time.time()

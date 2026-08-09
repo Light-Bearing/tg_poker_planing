@@ -53,7 +53,17 @@ async def purge_expired_sessions() -> None:
     Только веб-сессии: у игр из Telegram нет WebSocket-подключений, и под правило
     «нет подключений — удалить» они попадать не должны.
     """
+    # Метки живут в памяти, поэтому записи, пережившие перезапуск процесса, и те,
+    # чей сокет так и не открылся, метки не имеют. Восстанавливаем её по одним
+    # идентификаторам: содержимое задач читать незачем.
+    for session_id in await state.storage.list_web_session_ids(WEB_CHAT_ID):
+        manager.mark_orphaned_if_idle(session_id)
+
     for session_id in manager.orphaned_web_sessions(SESSION_TTL_SECONDS):
+        # Между итерациями цикл событий отдаёт управление, и кто-то мог успеть
+        # подключиться к сессии, попавшей в список.
+        if manager.active_connections.get(session_id):
+            continue
         await state.storage.delete_game(WEB_CHAT_ID, session_id)
         await manager.cleanup_session(session_id)
         logger.info("Сессия %s удалена: участников нет дольше %.0f с", session_id, SESSION_TTL_SECONDS)
@@ -67,7 +77,11 @@ async def session_cleanup_loop(interval: float) -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await purge_expired_sessions()
+            try:
+                await purge_expired_sessions()
+            except Exception:
+                # Недоступная БД не должна отменять очистку памяти в этом же тике.
+                logger.exception("Не удалось удалить просроченные сессии")
             manager.cleanup_old_sessions()
             evict_stale_rate_limits()
         except Exception:

@@ -92,3 +92,29 @@ class TestDeleteGame:
         assert await reg.get_game("web", "s1") is None
         assert await reg.get_game("-100500", "s1") is not None
         await reg.close()
+
+
+class TestListWebSessionIds:
+    @pytest.mark.asyncio
+    async def test_возвращает_идентификаторы_своего_чата(self, tmp_path):
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        await reg.save_game(reg.new_game("web", "s1", Initiator.from_web("alice"), "задача"))
+        await reg.save_game(reg.new_game("web", "s2", Initiator.from_web("alice"), "задача"))
+        await reg.save_game(reg.new_game("-100500", "s3", Initiator.from_web("bob"), "telegram-задача"))
+
+        assert sorted(await reg.list_web_session_ids("web")) == ["s1", "s2"]
+        await reg.close()
+
+    @pytest.mark.asyncio
+    async def test_содержимое_задач_не_читается(self, tmp_path):
+        """Метод существует ради идентификаторов: тексты задач наружу выдавать нельзя."""
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        await reg.save_game(reg.new_game("web", "s1", Initiator.from_web("alice"), "секретное описание"))
+
+        ids = await reg.list_web_session_ids("web")
+
+        assert ids == ["s1"]
+        assert all(isinstance(item, str) for item in ids)
+        await reg.close()

@@ -299,6 +299,11 @@ class GameRegistry:
         )
         await self._db.commit()
 
+    async def list_web_session_ids(self, chat_id) -> list[str]:
+        """Идентификаторы сохранённых сессий чата. Содержимое не читается."""
+        async with self._db.execute("SELECT game_id FROM games WHERE chat_id = ?", (chat_id,)) as cursor:
+            return [row[0] for row in await cursor.fetchall()]
+
     async def delete_game(self, chat_id, game_id: str) -> None:
         """Удаляет игру. Используется при истечении срока жизни веб-сессии."""
         await self._db.execute("DELETE FROM games WHERE chat_id = ? AND game_id = ?", (chat_id, game_id))
