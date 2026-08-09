@@ -807,6 +807,31 @@ class TestWebSocketVoteValidation:
         assert stored_game.votes == {}
 
 
+class TestWebSocketJoinValidation:
+    @pytest.mark.asyncio
+    async def test_rejected_join_does_not_clobber_earlier_username(self, ws):
+        """Отклонённый join не должен стирать имя, под которым сокет уже вошёл:
+        иначе на disconnect соединение остаётся зарегистрированным навсегда."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": "alice"}),
+            json.dumps({"type": "join", "username": "<img src=x onerror=alert(1)>"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert errors, "на недопустимое имя должна прийти ошибка"
+        assert errors[0].args[0]["message"] == "Недопустимое имя участника"
+
+        assert manager.is_ws_connected("test-session", "alice") is False, "мёртвый сокет остался зарегистрированным"
+        assert manager.get_ws_by_username("test-session", "alice") is None
+
+
 class TestWebSocketFreshGame:
     @pytest.mark.asyncio
     async def test_vote_does_not_wipe_votes_cast_after_connect(self, ws):
