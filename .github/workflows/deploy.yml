@@ -1,0 +1,52 @@
+name: Sync to Hugging Face Spaces
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Добавить в README заголовок с настройками Space
+        run: |
+          # Hugging Face читает настройки Space из YAML-заголовка в начале README.md.
+          # Пуш идёт с --force, поэтому README из репозитория затирает README Space —
+          # без этого шага Space остался бы без конфигурации.
+          # Заголовок добавляется только в деплое, чтобы README на GitHub оставался чистым.
+          cp README.md /tmp/readme-github.md
+          cat > README.md <<'HEADER'
+          ---
+          title: Planning Poker
+          emoji: 🃏
+          colorFrom: gray
+          colorTo: pink
+          sdk: docker
+          app_port: 8000
+          pinned: false
+          short_description: Командная оценка задач по методике Planning Poker
+          ---
+
+          HEADER
+          cat /tmp/readme-github.md >> README.md
+
+      - name: Push to HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "Секрет HF_TOKEN не задан в настройках репозитория." >&2
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: заголовок с настройками Space"
+          # Адрес с токеном не пишем в лог: --force и HEAD:main, значение маскируется Actions
+          git push --force "https://light-bearing:${HF_TOKEN}@huggingface.co/spaces/light-bearing/planing_poker" HEAD:main
