@@ -740,3 +740,33 @@ class TestValidateUsername:
         from web_api import validate_username
 
         assert validate_username("a" * 32) == "a" * 32
+
+
+class TestRateLimitEviction:
+    def test_evict_removes_idle_keys(self):
+        import time
+
+        import web_api
+        from web_api import _check_rate_limit, evict_stale_rate_limits, reset_rate_limits
+
+        reset_rate_limits()
+        _check_rate_limit("ip:1.2.3.4", max_requests=5, window=0.01)
+        assert "ip:1.2.3.4" in web_api._rate_limit_store
+
+        time.sleep(0.02)  # единственная метка этого ключа устарела
+        evict_stale_rate_limits(window=0.01)
+
+        assert "ip:1.2.3.4" not in web_api._rate_limit_store
+        reset_rate_limits()
+
+    def test_evict_keeps_recent_keys(self):
+        import web_api
+        from web_api import _check_rate_limit, evict_stale_rate_limits, reset_rate_limits
+
+        reset_rate_limits()
+        _check_rate_limit("ip:9.9.9.9", max_requests=5, window=60)
+
+        evict_stale_rate_limits(window=60)
+
+        assert "ip:9.9.9.9" in web_api._rate_limit_store
+        reset_rate_limits()
