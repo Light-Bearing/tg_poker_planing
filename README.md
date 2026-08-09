@@ -323,6 +323,7 @@ tg_poker_planing/
 | `RENDER_EXTERNAL_URL` | | - | URL для webhook режима |
 | `WEBHOOK_URL` | | - | Альтернативный URL для webhook |
 | `PORT` | | `8000` | Порт веб-сервера |
+| `SESSION_CLEANUP_INTERVAL` | | `600` | Период очистки неактивных сессий из памяти, секунды |
 
 ### Шкалы оценок
 
