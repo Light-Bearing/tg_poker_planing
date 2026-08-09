@@ -20,10 +20,11 @@ def _reset_manager():
 
 @pytest.fixture(autouse=True)
 async def _game_storage(tmp_path):
-    state.storage = GameRegistry()
-    await state.storage.init_db(str(tmp_path / "test.db"))
+    registry = GameRegistry()
+    state.storage = registry
+    await registry.init_db(str(tmp_path / "test.db"))
     yield
-    await state.storage.close()
+    await registry.close()
 
 
 @pytest.fixture
