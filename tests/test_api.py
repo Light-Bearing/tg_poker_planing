@@ -490,3 +490,19 @@ class TestUsernameValidation:
         )
         assert r.status_code == 400
         assert r.json()["error"] == NAME_ERROR
+
+
+class TestVoteSecrecy:
+    def test_real_point_hidden_until_reveal(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+
+        before = client.get(f"/api/sessions/{sid}").json()
+        assert before["votes"], "голос должен быть записан"
+        assert all("real_point" not in v for v in before["votes"])
+
+        client.post(f"/api/sessions/{sid}/reveal", json={"username": "alice"})
+
+        after = client.get(f"/api/sessions/{sid}").json()
+        assert after["votes"][0]["real_point"] == "5"

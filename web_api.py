@@ -53,15 +53,17 @@ def validate_username(raw: str) -> str | None:
 def game_to_web_response(game: Game, session_id: str) -> dict:
     votes = []
     for user_id, vote in game.votes.items():
-        votes.append(
-            {
-                "user_id": user_id,
-                "username": user_id.replace("web_", "") if user_id.startswith("web_") else user_id,
-                "point": vote.point if game.revealed else vote.masked,
-                "real_point": vote.point,
-                "version": vote.version,
-            }
-        )
+        payload = {
+            "user_id": user_id,
+            "username": user_id.replace("web_", "") if user_id.startswith("web_") else user_id,
+            "point": vote.point if game.revealed else vote.masked,
+            "version": vote.version,
+        }
+        # Реальное значение голоса отдаём только после вскрытия карт —
+        # иначе анонимность ломается через DevTools.
+        if game.revealed:
+            payload["real_point"] = vote.point
+        votes.append(payload)
     return {
         "session_id": session_id,
         "text": game.text,
@@ -230,7 +232,7 @@ async def process_web_vote(session_id: str, game, username: str, point: str):
     Note: point validation must be done by the caller before calling this function.
     """
     user_id = f"web_{username}"
-    vote_data = {"user_id": user_id, "username": username, "point": point, "real_point": point, "version": 0}
+    vote_data = {"user_id": user_id, "username": username, "point": point, "version": 0}
     game.add_vote({"id": user_id, "first_name": username, "username": username}, point)
     await state.storage.save_game(game)
     manager.update_user_vote(session_id, username, vote_data)

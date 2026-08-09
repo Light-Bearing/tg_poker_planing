@@ -359,7 +359,7 @@ class TestGameToWebResponse:
         result = game_to_web_response(game, "s1")
         assert result["vote_count"] == 1
         assert result["votes"][0]["point"] == "♥"  # masked, not revealed
-        assert result["votes"][0]["real_point"] == "5"
+        assert "real_point" not in result["votes"][0]
 
     def test_game_to_web_response_revealed(self):
         from ppbot.game import Game
@@ -378,6 +378,32 @@ class TestGameToWebResponse:
         game = Game(-100, "s1", {"id": 123, "first_name": "A"}, "task")
         result = game_to_web_response(game, "s1")
         assert result["initiator"] == "123"
+
+    def test_real_point_present_after_reveal(self):
+        from ppbot.game import Game
+        from web_api import game_to_web_response
+
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "a"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "a"}, "5")
+        game.revealed = True
+        result = game_to_web_response(game, "s1")
+        assert result["votes"][0]["real_point"] == "5"
+        assert result["votes"][0]["point"] == "5"
+
+    def test_enriched_participants_hide_real_point_before_reveal(self):
+        from connection import manager
+        from ppbot.game import Game
+        from web_api import enrich_session_response
+
+        manager.session_users.clear()
+        manager.register_user("s1", "alice")
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "8")
+
+        result = enrich_session_response(game, "s1")
+        participant = next(p for p in result["participants"] if p["username"] == "alice")
+        assert "real_point" not in participant["vote"]
+        manager.session_users.clear()
 
 
 class TestEnrichSessionResponse:
