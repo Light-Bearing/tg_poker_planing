@@ -310,15 +310,6 @@ class GameRegistry:
         )
         await self._db.commit()
 
-    async def list_all_sessions(self, chat_id: str, limit: int = 50, offset: int = 0) -> list[tuple[str, Game]]:
-        """Возвращает список (game_id, Game) для указанного chat_id с пагинацией."""
-        async with self._db.execute(
-            "SELECT game_id, json_data FROM games WHERE chat_id = ? ORDER BY rowid DESC LIMIT ? OFFSET ?",
-            (chat_id, limit, offset),
-        ) as cursor:
-            rows = await cursor.fetchall()
-            return [(row[0], Game.from_dict(chat_id, row[0], json.loads(row[1]))) for row in rows]
-
     async def count_sessions(self, chat_id: str) -> int:
         """Возвращает количество сессий для указанного chat_id."""
         async with self._db.execute("SELECT COUNT(*) FROM games WHERE chat_id = ?", (chat_id,)) as cursor:

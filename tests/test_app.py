@@ -64,6 +64,24 @@ class TestBuildApp:
             assert "POST" in methods_seen, "POST /api/custom-scale must be registered for saving a custom scale"
 
     @pytest.mark.asyncio
+    async def test_build_app_does_not_expose_session_listing(self):
+        """GET /api/sessions отдавал текст всех задач кому угодно без аутентификации.
+        Маршрут убран целиком; POST /api/sessions (создание комнаты) остаётся."""
+        with (
+            patch("app.init_bot", new=AsyncMock()),
+            patch("app.GameRegistry"),
+            patch("app.Jinja2Templates"),
+            patch("os.path.exists", return_value=False),
+        ):
+            from app import build_app
+
+            app = await build_app()
+            session_routes = [r for r in app.routes if getattr(r, "path", None) == "/api/sessions"]
+            methods_seen = {m for r in session_routes for m in (r.methods or set())}
+            assert "GET" not in methods_seen, "GET /api/sessions отдаёт список всех сессий — маршрута быть не должно"
+            assert "POST" in methods_seen, "POST /api/sessions создаёт комнату и должен остаться"
+
+    @pytest.mark.asyncio
     async def test_build_app_calls_init_bot(self):
         init_bot_mock = AsyncMock()
         with (
@@ -645,35 +663,6 @@ class TestAPIErrorHandling:
 
         with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
             resp = tc.post("/api/sessions/reveal_err/reveal", json={"username": "alice"})
-            assert resp.status_code == 500
-
-        asyncio.run(state.storage.close())
-
-    def test_api_list_sessions_exception(self, tmp_path):
-        """Exception in api_list_sessions returns 500."""
-        import asyncio
-
-        import state
-        from ppbot.game import GameRegistry
-
-        state.storage = GameRegistry()
-        asyncio.run(state.storage.init_db(str(tmp_path / "test_err6.db")))
-
-        from starlette.applications import Starlette
-        from starlette.middleware import Middleware
-        from starlette.middleware.cors import CORSMiddleware
-        from starlette.routing import Route
-        from starlette.testclient import TestClient
-
-        from web_api import api_list_sessions
-
-        app = Starlette(
-            routes=[Route("/api/sessions", api_list_sessions, methods=["GET"])],
-            middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
-        )
-        tc = TestClient(app)
-        with patch("web_api.state.storage.list_all_sessions", side_effect=Exception("db error")):
-            resp = tc.get("/api/sessions")
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
