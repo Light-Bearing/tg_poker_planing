@@ -40,14 +40,16 @@ class ToastManager {
         if (!this.container) this.init();
         
         const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+        const safeTitle = escapeHtml(title);
+        const safeMessage = escapeHtml(message);
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         toast.setAttribute('role', 'alert');
         toast.innerHTML = `
             <div class="toast-icon">${icons[type] || 'ℹ'}</div>
             <div class="toast-body">
-                <div class="toast-title">${title}</div>
-                <div class="toast-message">${message}</div>
+                <div class="toast-title">${safeTitle}</div>
+                <div class="toast-message">${safeMessage}</div>
             </div>
             <button class="toast-close" onclick="this.parentElement.remove()">✕</button>
             <div class="toast-progress" style="animation-duration: ${duration}ms;"></div>
