@@ -184,7 +184,11 @@ async def api_set_scale(request: Request):
             return JSONResponse({"error": "Only initiator can change scale"}, status_code=403)
 
         game.scale_name = scale_name if scale_name in SCALES else DEFAULT_SCALE
+        # Голоса по старой шкале в новой могут отсутствовать — сбрасываем,
+        # иначе среднее считается по значениям, которые нельзя переголосовать.
+        game.restart()
         await state.storage.save_game(game)
+        manager.reset_session_users(session_id)
         await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
         return JSONResponse(enrich_session_response(game, session_id))
     except Exception as e:

@@ -178,6 +178,10 @@
                 <div class="right-panel">
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
+                        <div class="scale-selector session-scale-selector" id="sessionScaleSelector">
+                            <span class="scale-selector-label">📐 Шкала</span>
+                            <div class="scale-selector-buttons" id="sessionScaleSelectorButtons"></div>
+                        </div>
                         <div style="display: flex; gap: 8px; flex-direction: column;">
                             <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
                             <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>

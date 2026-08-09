@@ -510,3 +510,25 @@ class TestVoteSecrecy:
         assert after["votes"][0]["real_point"] == "5", "real_point must be present after reveal"
         assert "average" in after, "average must be present after reveal"
         assert after["average"] == 5.0, "average must equal the single vote"
+
+
+class TestScaleChangeResetsVotes:
+    def test_rest_set_scale_clears_votes(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+        assert client.get(f"/api/sessions/{sid}").json()["vote_count"] == 1
+
+        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "alice", "scale_name": "fibonacci"})
+        assert r.status_code == 200
+
+        after = client.get(f"/api/sessions/{sid}").json()
+        assert after["scale_name"] == "fibonacci"
+        assert after["vote_count"] == 0
+        assert after["revealed"] is False
+
+    def test_rest_set_scale_rejected_for_non_initiator(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "bob", "scale_name": "fibonacci"})
+        assert r.status_code == 403

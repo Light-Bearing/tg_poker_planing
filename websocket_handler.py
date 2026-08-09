@@ -158,7 +158,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 )
                             else:
                                 game.scale_name = scale_name
+                                game.restart()
                                 await state.storage.save_game(game)
+                                manager.reset_session_users(session_id)
                                 await manager.broadcast(
                                     session_id,
                                     {"type": "update", "data": enrich_session_response(game, session_id)},
