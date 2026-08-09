@@ -114,6 +114,24 @@ test('голый URL с подчёркиваниями становится сс
     assert.strictEqual(link.href, 'https://wiki.corp/api_v2_spec');
 });
 
+test('голый URL не глотает точку в конце предложения', () => {
+    const nodes = parseInline('см. https://wiki.corp/page.');
+    const link = nodes.find(n => n.type === 'link');
+    assert.strictEqual(link.href, 'https://wiki.corp/page');
+    assert.strictEqual(shape(nodes), 'см. link[https://wiki.corp/page](https://wiki.corp/page).');
+
+    const html = parseJiraWiki('см. https://wiki.corp/page.');
+    assert.match(html, /href="https:\/\/wiki\.corp\/page"/);
+    assert.match(html, /<\/a>\.<\/p>/, 'точка должна остаться за пределами ссылки');
+});
+
+test('голый URL в скобках и с подчёркиваниями цел', () => {
+    const nodes = parseInline('(см. https://example.com/a_b)');
+    const link = nodes.find(n => n.type === 'link');
+    assert.strictEqual(link.href, 'https://example.com/a_b');
+    assert.strictEqual(shape(nodes), '(см. link[https://example.com/a_b](https://example.com/a_b))');
+});
+
 test('тильда внутри голого URL не превращается в нижний индекс', () => {
     const nodes = parseInline('см. https://example.com/~user/a~b тут');
     const link = nodes.find(n => n.type === 'link');

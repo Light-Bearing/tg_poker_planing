@@ -61,6 +61,12 @@
     // Символы, на которых обрывается голый URL (кроме пробельных).
     const BARE_URL_STOP = /[\s<>"’)\]]/;
 
+    // Знаки препинания, которые в конце голого URL почти всегда принадлежат
+    // предложению, а не адресу: "см. https://wiki.corp/page." — точка внешняя.
+    // Обрезаются ТОЛЬКО с конца, поэтому https://example.com/a_b и адрес,
+    // оборванный на `)`, не страдают.
+    const BARE_URL_TRAILING = /[.,;:!?]+$/;
+
     function normalizeHref(href) {
         if (/^(https?:\/\/|mailto:)/i.test(href)) return href;
         return 'https://' + href;
@@ -163,14 +169,20 @@
                 while (j < text.length && !BARE_URL_STOP.test(text[j])) {
                     j++;
                 }
-                const url = text.slice(i, j);
+                let url = text.slice(i, j);
+                const trimmed = url.replace(BARE_URL_TRAILING, '');
+                // Обрезка не должна съесть адрес целиком: "https://..." без
+                // хоста остаётся тем же, чем был до неё.
+                if (/^https?:\/\/./i.test(trimmed)) url = trimmed;
                 flush();
                 nodes.push({
                     type: 'link',
                     href: url,
                     children: [{ type: 'text', text: url }],
                 });
-                i = j;
+                // Обрезанные знаки препинания остаются текстом: i двигается
+                // ровно на длину адреса, а не до j.
+                i += url.length;
                 continue;
             }
 
