@@ -319,11 +319,20 @@
     // рекурсивный вызов берёт свою глубину из первого встреченного пункта,
     // поэтому промежуточные уровни просто не создаются. Ни один из этих
     // случаев не зацикливает разбор — pos.i продвигается на каждой итерации.
+    //
+    // Смена типа (ordered) на той же глубине тоже завершает текущее
+    // поддерево, а не молча меняет тип уже начатого <ul>/<ol> — иначе
+    // "* a" сразу за которым "# b" склеились бы в один список с двумя
+    // разнородными пунктами.
     function buildList(flatItems, pos) {
         const depth = flatItems[pos.i].depth;
         const ordered = flatItems[pos.i].ordered;
         const items = [];
-        while (pos.i < flatItems.length && flatItems[pos.i].depth === depth) {
+        while (
+            pos.i < flatItems.length &&
+            flatItems[pos.i].depth === depth &&
+            flatItems[pos.i].ordered === ordered
+        ) {
             const text = flatItems[pos.i].text;
             pos.i += 1;
             let children = null;
@@ -444,7 +453,11 @@
                 while (i < lines.length) {
                     const m = LIST_ITEM_RE.exec(lines[i]);
                     if (!m) break;
-                    flatItems.push({ depth: m[2].length, ordered: m[2][0] === '#', text: m[3] });
+                    // Тип уровня называет ПОСЛЕДНИЙ символ серии — вся серия
+                    // описывает путь до текущего уровня, а не только его тип
+                    // (#* — вложенный маркированный пункт внутри нумерованного).
+                    const markers = m[2];
+                    flatItems.push({ depth: markers.length, ordered: markers[markers.length - 1] === '#', text: m[3] });
                     i += 1;
                 }
                 blocks.push.apply(blocks, buildAllLists(flatItems));
@@ -520,7 +533,7 @@
     function renderList(block) {
         const tag = block.ordered ? 'ol' : 'ul';
         const itemsHtml = block.items.map(function (item) {
-            const childrenHtml = item.children ? renderBlocks([item.children]) : '';
+            const childrenHtml = item.children ? renderBlock(item.children) : '';
             return '<li>' + renderInline(parseInline(item.text)) + childrenHtml + '</li>';
         }).join('');
         return '<' + tag + '>' + itemsHtml + '</' + tag + '>';
@@ -544,7 +557,15 @@
     function renderBlock(block) {
         switch (block.type) {
             case 'paragraph':
-                return '<p>' + renderInline(parseInline(block.text)) + '</p>';
+                // parseBlocks склеивает соседние непустые строки одного абзаца
+                // через '\n' — это одиночный перенос строки Jira, и Jira рисует
+                // его жёстким переносом. Раскладываем по строкам и разбираем
+                // инлайн отдельно на каждой, соединяя их <br>, а не отдаём
+                // склеенный текст с литеральным '\n' одним вызовом parseInline —
+                // иначе браузер схлопнёт перевод строки в пробел.
+                return '<p>' + block.text.split('\n').map(function (line) {
+                    return renderInline(parseInline(line));
+                }).join('<br>') + '</p>';
             case 'heading':
                 return '<h' + block.level + '>' + renderInline(parseInline(block.text)) + '</h' + block.level + '>';
             case 'code': {

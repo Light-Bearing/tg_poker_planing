@@ -267,6 +267,37 @@ test('регрессия: содержимое блока кода дослов�
     assert.match(html, /x_y_z/);
 });
 
+test('регрессия: одиночный перенос строки внутри абзаца становится <br>', () => {
+    const html = parseJiraWiki('Нужно починить отчёт.\nСрок — пятница.\nОтветственный — Иванов.');
+    const brCount = (html.match(/<br>/g) || []).length;
+    assert.strictEqual(brCount, 2, 'между тремя строками абзаца должно быть ровно два <br>');
+    assert.match(html, /Нужно починить отчёт\.<br>Срок — пятница\.<br>Ответственный — Иванов\./);
+});
+
+test('регрессия: <br> внутри абзаца не портит списки, таблицы и код рядом', () => {
+    const listHtml = parseJiraWiki('* первый\n* второй');
+    assert.ok(!/<ul>[\s\S]*<br>[\s\S]*<\/ul>/.test(listHtml), 'внутри списка по-прежнему нет <br>');
+
+    const tableHtml = parseJiraWiki('|a|b|');
+    assert.ok(!/<tbody>[\s\S]*<br>[\s\S]*<\/tbody>/.test(tableHtml), 'внутри таблицы по-прежнему нет <br>');
+
+    const codeHtml = parseJiraWiki('{code}\nстрока1\nстрока2\n{code}');
+    assert.ok(!/<br>/.test(codeHtml), 'внутри кода по-прежнему нет <br>');
+});
+
+test('регрессия: тип вложенного уровня списка определяется последним символом серии', () => {
+    const olWithUl = parseJiraWiki('# шаг\n#* деталь\n#* деталь\n# шаг два');
+    assert.match(olWithUl, /<ol><li>шаг<ul><li>деталь<\/li><li>деталь<\/li><\/ul><\/li><li>шаг два<\/li><\/ol>/);
+
+    const ulWithOl = parseJiraWiki('* пункт\n*# нумерованный');
+    assert.match(ulWithOl, /<ul><li>пункт<ol><li>нумерованный<\/li><\/ol><\/li><\/ul>/);
+});
+
+test('регрессия: смена типа на одной глубине даёт два отдельных списка', () => {
+    const html = parseJiraWiki('* a\n# b');
+    assert.match(html, /<ul><li>a<\/li><\/ul><ol><li>b<\/li><\/ol>/);
+});
+
 // --- вывод и экранирование ---
 
 test('вывод обёрнут в jira-doc', () => {
@@ -278,6 +309,21 @@ test('опасные символы экранируются', () => {
     assert.ok(!/<script>/.test(html));
     assert.match(html, /&lt;script&gt;/);
     assert.match(html, /&amp;/);
+    assert.match(html, /&quot;кавычки&quot;/);
+});
+
+test('блок кода с языком отрисовывает data-language', () => {
+    const html = parseJiraWiki('{code:java}int x = 1;{code}');
+    assert.match(html, /<pre class="jira-code"><code data-language="java">int x = 1;<\/code><\/pre>/);
+});
+
+test('цитата отрисовывается как blockquote', () => {
+    const html = parseJiraWiki('{quote}текст цитаты{quote}');
+    assert.match(html, /<blockquote><p>текст цитаты<\/p><\/blockquote>/);
+});
+
+test('горизонтальная линия отрисовывается как hr', () => {
+    assert.strictEqual(parseJiraWiki('----'), '<div class="jira-doc"><hr></div>');
 });
 
 test('пустой ввод даёт пустую строку', () => {
