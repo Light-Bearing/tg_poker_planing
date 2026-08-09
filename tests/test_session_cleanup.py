@@ -1,8 +1,20 @@
 """Tests for session cleanup to prevent memory leaks."""
 
+import asyncio
+import time
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from connection import manager
+
+
+def _fake_ws():
+    """Заглушка WebSocket: connect() ждёт accept(), cleanup_session() — close()."""
+    ws = MagicMock()
+    ws.accept = AsyncMock()
+    ws.close = AsyncMock()
+    return ws
 
 
 @pytest.fixture(autouse=True)
@@ -11,6 +23,7 @@ def _reset():
     manager.session_users.clear()
     manager.ws_username_map.clear()
     manager._ws_connections.clear()
+    manager._orphaned_at.clear()
 
 
 class TestSessionCleanup:
@@ -54,6 +67,64 @@ class TestSessionCleanup:
 
         assert "s1" not in manager.session_users
         assert "s1" not in manager.active_connections
+
+
+class TestOrphanTracking:
+    def test_метка_ставится_когда_ушёл_последний(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert "s1" in manager._orphaned_at
+
+    def test_метка_не_ставится_пока_кто_то_остаётся(self):
+        a, b = _fake_ws(), _fake_ws()
+        asyncio.run(manager.connect("s1", a))
+        asyncio.run(manager.connect("s1", b))
+        manager.disconnect("s1", a)
+        assert "s1" not in manager._orphaned_at
+
+    def test_новое_подключение_снимает_метку(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert "s1" in manager._orphaned_at
+        asyncio.run(manager.connect("s1", _fake_ws()))
+        assert "s1" not in manager._orphaned_at
+
+    def test_созревшая_метка_попадает_в_список(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        manager._orphaned_at["s1"] = time.time() - 600
+        assert manager.orphaned_web_sessions(300) == ["s1"]
+
+    def test_свежая_метка_не_попадает(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert manager.orphaned_web_sessions(300) == []
+
+    def test_сессия_с_подключением_не_попадает(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager._orphaned_at["s1"] = time.time() - 600
+        assert manager.orphaned_web_sessions(300) == []
+
+    def test_метка_переживает_cleanup_old_sessions(self):
+        """Очистка памяти не должна стирать метку — иначе запись в БД останется навсегда."""
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.register_user("s1", "alice")
+        manager.disconnect("s1", ws)
+        manager.cleanup_old_sessions()
+        assert "s1" in manager._orphaned_at
+
+    def test_cleanup_session_снимает_метку(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        asyncio.run(manager.cleanup_session("s1"))
+        assert "s1" not in manager._orphaned_at
 
 
 class TestCleanupLoop:
