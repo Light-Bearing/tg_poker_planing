@@ -7,7 +7,7 @@ from starlette.testclient import TestClient
 
 import state
 from connection import manager
-from ppbot.game import GameRegistry
+from ppbot.game import SCALES, GameRegistry
 from web_api import (
     api_create_session,
     api_get_custom_scale,
@@ -373,6 +373,66 @@ class TestCustomScale:
         assert data["scale_name"] == "custom"
         # Should include saved custom points
         assert data["available_points"] == points
+
+
+SCALE_POINT_ERROR = "Each point must be 1-8 characters: letters, digits, and . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+
+
+class TestCustomScalePointValidation:
+    """Значение точки шкалы попадает в innerHTML на фронте — валидируем на входе."""
+
+    def _points_with(self, bad: str) -> list[str]:
+        return ["1", "2", "3", "4", "5", "6", "7", bad]
+
+    def test_rejects_html_payload(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": self._points_with('<img src=x onerror="alert(1)">')},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == SCALE_POINT_ERROR
+
+    def test_rejects_quotes_and_ampersand(self, client):
+        for bad in ['"', "'", "&", "`", "<b>", "a>b"]:
+            resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with(bad)})
+            assert resp.status_code == 400, f"{bad!r} должен быть отклонён"
+
+    def test_rejects_too_long_point(self, client):
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with("123456789")})
+        assert resp.status_code == 400
+
+    def test_rejects_blank_point(self, client):
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with("   ")})
+        assert resp.status_code == 400
+
+    def test_accepts_builtin_scale_values(self, client):
+        """Значения встроенных шкал должны проходить валидацию."""
+        for scale_name, points in SCALES.items():
+            padded = points if len(points) >= 8 else points + [f"x{i}" for i in range(8 - len(points))]
+            resp = client.post("/api/custom-scale", json={"username": "Alice", "points": padded})
+            assert resp.status_code == 200, f"шкала {scale_name} отклонена: {resp.json()}"
+
+    def test_accepts_plain_labels(self, client):
+        points = ["1", "2.5", "13", "XS", "XXL", "½", "❔", "☕", "Оценка"]
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": points})
+        assert resp.status_code == 200
+        assert resp.json()["points"] == points
+
+    def test_poisoned_point_never_becomes_votable(self, client):
+        """Сквозная проверка: отравленную точку нельзя ни сохранить, ни за неё проголосовать."""
+        payload = '<img src=x onerror="alert(1)">'
+        save = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with(payload)})
+        assert save.status_code == 400
+
+        created = client.post(
+            "/api/sessions", json={"username": "Alice", "text": "task", "scale_name": "custom"}
+        ).json()
+        assert payload not in created["available_points"]
+
+        vote = client.post(
+            f"/api/sessions/{created['session_id']}/vote", json={"username": "Alice", "point": payload}
+        )
+        assert vote.status_code == 400
 
 
 class TestKick:
