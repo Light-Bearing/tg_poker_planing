@@ -1,12 +1,59 @@
 // PP Jira Bridge — background script
 // Работает в Chrome (MV3) и Firefox (MV2)
 
-const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
-const storage = typeof browser !== 'undefined' ? browser.storage : chrome.storage;
+// В браузере это browser.* (Firefox) или chrome.* (Chrome). В Node (юнит-тесты хелпера)
+// браузерных API нет — тогда слушатель не регистрируется, наружу отдаётся только чистая функция.
+const api = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undefined' ? chrome : null);
+const runtime = api ? api.runtime : null;
+const storage = api ? api.storage : null;
 
 // Хелпер для заголовков запросов к Jira
 function jiraAuth(token, extra = {}) {
     return { ...extra, 'Authorization': `Bearer ${token}` };
+}
+
+// Разбирает тело ошибочного ответа Jira в читаемое сообщение.
+// Чистая функция от (status, text) — покрыта тестами в tests/js/jira-error.test.js.
+// Код ответа выводится всегда: за Jira может стоять nginx или WAF, и тогда тело —
+// HTML-страница или пустота, а важен именно код.
+function describeJiraError(status, text) {
+    const prefix = `HTTP ${status}`;
+    const raw = typeof text === 'string' ? text : '';
+    if (!raw.trim()) return prefix;
+
+    // Запасной вариант: сам текст со схлопнутыми пробелами и обрезкой —
+    // и для не-JSON (страница nginx длинная и с переводами строк), и для JSON без знакомых полей.
+    const plain = raw.replace(/\s+/g, ' ').trim().slice(0, 300);
+
+    let detail = '';
+    try {
+        const body = JSON.parse(raw);
+        if (body && typeof body === 'object') {
+            if (Array.isArray(body.errorMessages) && body.errorMessages.length) {
+                detail = body.errorMessages.filter(Boolean).join('; ');
+            } else if (body.errors && typeof body.errors === 'object') {
+                detail = Object.values(body.errors).filter(Boolean).join('; ');
+            } else if (body.errors) {
+                detail = String(body.errors);
+            } else if (body.message) {
+                detail = String(body.message);
+            }
+        }
+    } catch (_) {
+        // Не JSON — покажем сам текст
+    }
+
+    return `${prefix}: ${detail || plain}`;
+}
+
+// Читает тело ошибочного ответа и формирует сообщение.
+// r.json() на ошибочном ответе не вызываем никогда: не-JSON тело бросит исключение,
+// и пользователь увидит SyntaxError вместо кода ответа.
+function jiraErrorFromResponse(r) {
+    return r.text().then(
+        text => describeJiraError(r.status, text),
+        () => `HTTP ${r.status}`
+    );
 }
 
 // Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
@@ -18,7 +65,7 @@ function friendlyError(err) {
     return msg;
 }
 
-runtime.onMessage.addListener((message, sender, sendResponse) => {
+function handleMessage(message, sender, sendResponse) {
     // Сохранить настройки
     if (message.type === 'saveSettings') {
         storage.local.set({
@@ -47,22 +94,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
             .then(r => {
                 if (r.ok) return r.json();
-                // Читаем тело ответа как текст, чтобы увидеть что вернула Jira
-                return r.text().then(text => {
-                    let msg = `HTTP ${r.status}`;
-                    try {
-                        const body = JSON.parse(text);
-                        if (body.errorMessages && body.errorMessages.length) {
-                            msg = body.errorMessages.join('; ');
-                        } else if (body.message) {
-                            msg = body.message;
-                        }
-                    } catch (_) {
-                        // Не JSON — может HTML-страница ошибки
-                        if (text && text.length < 300) msg = text;
-                    }
-                    return Promise.reject(msg);
-                });
+                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
             })
             .then(data => sendResponse({ ok: true, displayName: data.displayName }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
@@ -105,17 +137,7 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
             .then(r => {
                 if (r.ok || r.status === 204) return { ok: true };
-                return r.json().then(e => {
-                    let errMsg = '';
-                    if (e.errorMessages && e.errorMessages.length > 0) {
-                        errMsg = e.errorMessages.join('; ');
-                    } else if (e.errors && typeof e.errors === 'object') {
-                        errMsg = Object.values(e.errors).filter(Boolean).join('; ');
-                    } else if (e.errors) {
-                        errMsg = String(e.errors);
-                    }
-                    return Promise.reject(errMsg || `HTTP ${r.status}`);
-                });
+                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
             })
             .then(data => sendResponse(data))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
@@ -132,12 +154,20 @@ runtime.onMessage.addListener((message, sender, sendResponse) => {
         })
             .then(r => {
                 if (r.ok || r.status === 201) return { ok: true };
-                return r.json().then(e => Promise.reject(e.errors || e.errorMessages?.[0] || `HTTP ${r.status}`));
+                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
             })
             .then(data => sendResponse(data))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
         return true;
     }
-});
+}
 
-console.log('PP Jira Bridge background script loaded');
+if (runtime) {
+    runtime.onMessage.addListener(handleMessage);
+    console.log('PP Jira Bridge background script loaded');
+}
+
+// Экспорт для юнит-тестов: в браузере module не определён, ветка не выполняется
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { describeJiraError };
+}
