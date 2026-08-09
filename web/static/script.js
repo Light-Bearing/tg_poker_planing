@@ -183,7 +183,9 @@ function jiraSendMessage(msg) {
             _jiraPending.delete(msgId);
             resolve({
                 ok: false,
-                error: 'Расширение не ответило за 20 с. Проверьте, что оно включено, и перезагрузите страницу.',
+                // Причина может быть и в расширении, и в зависшем запросе к Jira —
+                // не уводим владельца копаться только в about:debugging
+                error: 'Расширение или Jira не ответили за 20 с. Проверьте, что расширение включено, и попробуйте ещё раз.',
             });
         }, JIRA_EXT_TIMEOUT);
         _jiraPending.set(msgId, { resolve, timer });
