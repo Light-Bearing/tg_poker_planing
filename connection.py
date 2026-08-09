@@ -1,4 +1,5 @@
 import asyncio
+import time
 from contextlib import suppress
 from typing import TYPE_CHECKING, Optional
 
@@ -22,6 +23,8 @@ class ConnectionManager:
         self.session_users: dict[str, dict[str, dict]] = {}
         self.ws_username_map: dict[str, set[str]] = {}
         self._ws_connections: dict[str, dict[str, WebSocket]] = {}
+        # Момент, когда сессия осталась без активных подключений (session_id -> time.time())
+        self._orphaned_at: dict[str, float] = {}
 
     async def connect(self, session_id: str, websocket: WebSocket):
         """Accept and register a new WebSocket connection for a session."""
@@ -31,6 +34,8 @@ class ConnectionManager:
         if session_id not in self.session_users:
             self.session_users[session_id] = {}
         self.active_connections[session_id].append(websocket)
+        # Кто-то вернулся — сессия больше не осиротевшая.
+        self._orphaned_at.pop(session_id, None)
 
     def disconnect(
         self,
@@ -58,6 +63,29 @@ class ConnectionManager:
             asyncio.create_task(
                 self.broadcast(session_id, {"type": "user_left", "username": username, "data": enriched})
             )
+
+        # Ушёл последний — засекаем время, с которого сессия считается осиротевшей.
+        if not self.active_connections.get(session_id):
+            self._orphaned_at[session_id] = time.time()
+
+    def mark_orphaned_if_idle(self, session_id: str) -> None:
+        """Помечает сессию осиротевшей, если у неё нет подключений и метки.
+
+        Нужно для записей, которые не проходили цикл «подключился-отключился»
+        в текущем процессе: они пережили перезапуск или их сокет не открылся.
+        """
+        if self.active_connections.get(session_id):
+            return
+        self._orphaned_at.setdefault(session_id, time.time())
+
+    def orphaned_web_sessions(self, ttl: float) -> list[str]:
+        """Сессии без активных подключений, осиротевшие дольше ttl секунд."""
+        now = time.time()
+        return [
+            sid
+            for sid, since in self._orphaned_at.items()
+            if not self.active_connections.get(sid) and now - since >= ttl
+        ]
 
     async def broadcast(self, session_id: str, message: dict):
         """Send a JSON message to all WebSocket clients in a session."""
@@ -159,11 +187,14 @@ class ConnectionManager:
         self.session_users.pop(session_id, None)
         self.ws_username_map.pop(session_id, None)
         self._ws_connections.pop(session_id, None)
+        self._orphaned_at.pop(session_id, None)
 
     def cleanup_old_sessions(self):
         """Очистка неактивных сессий.
 
         Удаляет сессии, которые не имеют активных WS-подключений.
+        Метку `_orphaned_at` не трогает: она должна пережить очистку памяти,
+        иначе запись в БД останется навсегда.
         """
         stale_sessions = [
             sid for sid in self.session_users if sid not in self.active_connections or not self.active_connections[sid]

@@ -463,24 +463,6 @@ async def api_save_custom_scale(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-async def api_list_sessions(request: Request):
-    try:
-        # Пагинация: ?limit=20&offset=0
-        try:
-            limit = min(int(request.query_params.get("limit", 20)), 100)
-            offset = max(int(request.query_params.get("offset", 0)), 0)
-        except (ValueError, TypeError):
-            limit, offset = 20, 0
-
-        sessions_raw = await state.storage.list_all_sessions(WEB_CHAT_ID, limit=limit, offset=offset)
-        total = await state.storage.count_sessions(WEB_CHAT_ID)
-        sessions = [enrich_session_response(game, game_id) for game_id, game in sessions_raw]
-        return JSONResponse({"sessions": sessions, "total": total, "limit": limit, "offset": offset})
-    except Exception as e:
-        logger.error(f"Error listing sessions: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
 async def health(_):
     from starlette.responses import PlainTextResponse
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ppbot.game import Game, GameRegistry
+from ppbot.game import Game, GameRegistry, Initiator
 
 
 class TestAutoRevealPersistence:
@@ -65,3 +65,56 @@ class TestAutoRevealDBPersistence:
         loaded = await self.registry.get_game(-100, "s2")
         assert loaded is not None
         assert loaded.auto_reveal is False
+
+
+class TestDeleteGame:
+    @pytest.mark.asyncio
+    async def test_delete_game_удаляет_запись(self, tmp_path):
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        game = reg.new_game("web", "s1", Initiator.from_web("alice"), "task")
+        await reg.save_game(game)
+        assert await reg.get_game("web", "s1") is not None
+        await reg.delete_game("web", "s1")
+        assert await reg.get_game("web", "s1") is None
+        await reg.close()
+
+    @pytest.mark.asyncio
+    async def test_delete_game_не_трогает_чужие(self, tmp_path):
+        """game_id у разных чатов может совпадать — удаление различает их по chat_id."""
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        web = reg.new_game("web", "s1", Initiator.from_web("alice"), "web-задача")
+        tg = reg.new_game("-100500", "s1", Initiator.from_web("bob"), "telegram-задача")
+        await reg.save_game(web)
+        await reg.save_game(tg)
+        await reg.delete_game("web", "s1")
+        assert await reg.get_game("web", "s1") is None
+        assert await reg.get_game("-100500", "s1") is not None
+        await reg.close()
+
+
+class TestListWebSessionIds:
+    @pytest.mark.asyncio
+    async def test_возвращает_идентификаторы_своего_чата(self, tmp_path):
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        await reg.save_game(reg.new_game("web", "s1", Initiator.from_web("alice"), "задача"))
+        await reg.save_game(reg.new_game("web", "s2", Initiator.from_web("alice"), "задача"))
+        await reg.save_game(reg.new_game("-100500", "s3", Initiator.from_web("bob"), "telegram-задача"))
+
+        assert sorted(await reg.list_web_session_ids("web")) == ["s1", "s2"]
+        await reg.close()
+
+    @pytest.mark.asyncio
+    async def test_содержимое_задач_не_читается(self, tmp_path):
+        """Метод существует ради идентификаторов: тексты задач наружу выдавать нельзя."""
+        reg = GameRegistry()
+        await reg.init_db(str(tmp_path / "t.db"))
+        await reg.save_game(reg.new_game("web", "s1", Initiator.from_web("alice"), "секретное описание"))
+
+        ids = await reg.list_web_session_ids("web")
+
+        assert ids == ["s1"]
+        assert all(isinstance(item, str) for item in ids)
+        await reg.close()

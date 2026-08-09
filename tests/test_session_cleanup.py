@@ -1,8 +1,23 @@
 """Tests for session cleanup to prevent memory leaks."""
 
+import asyncio
+import time
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+import state
+from config import WEB_CHAT_ID
 from connection import manager
+from ppbot.game import GameRegistry, Initiator
+
+
+def _fake_ws():
+    """Заглушка WebSocket: connect() ждёт accept(), cleanup_session() — close()."""
+    ws = MagicMock()
+    ws.accept = AsyncMock()
+    ws.close = AsyncMock()
+    return ws
 
 
 @pytest.fixture(autouse=True)
@@ -11,6 +26,7 @@ def _reset():
     manager.session_users.clear()
     manager.ws_username_map.clear()
     manager._ws_connections.clear()
+    manager._orphaned_at.clear()
 
 
 class TestSessionCleanup:
@@ -56,6 +72,181 @@ class TestSessionCleanup:
         assert "s1" not in manager.active_connections
 
 
+class TestOrphanTracking:
+    def test_метка_ставится_когда_ушёл_последний(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert "s1" in manager._orphaned_at
+
+    def test_метка_не_ставится_пока_кто_то_остаётся(self):
+        a, b = _fake_ws(), _fake_ws()
+        asyncio.run(manager.connect("s1", a))
+        asyncio.run(manager.connect("s1", b))
+        manager.disconnect("s1", a)
+        assert "s1" not in manager._orphaned_at
+
+    def test_новое_подключение_снимает_метку(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert "s1" in manager._orphaned_at
+        asyncio.run(manager.connect("s1", _fake_ws()))
+        assert "s1" not in manager._orphaned_at
+
+    def test_созревшая_метка_попадает_в_список(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        manager._orphaned_at["s1"] = time.time() - 600
+        assert manager.orphaned_web_sessions(300) == ["s1"]
+
+    def test_свежая_метка_не_попадает(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        assert manager.orphaned_web_sessions(300) == []
+
+    def test_сессия_с_подключением_не_попадает(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager._orphaned_at["s1"] = time.time() - 600
+        assert manager.orphaned_web_sessions(300) == []
+
+    def test_метка_переживает_cleanup_old_sessions(self):
+        """Очистка памяти не должна стирать метку — иначе запись в БД останется навсегда."""
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.register_user("s1", "alice")
+        manager.disconnect("s1", ws)
+        manager.cleanup_old_sessions()
+        assert "s1" in manager._orphaned_at
+
+    def test_cleanup_session_снимает_метку(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.disconnect("s1", ws)
+        asyncio.run(manager.cleanup_session("s1"))
+        assert "s1" not in manager._orphaned_at
+
+    def test_mark_orphaned_if_idle_ставит_метку_незнакомой_сессии(self):
+        """Запись, не проходившая цикл «подключился-отключился» в этом процессе."""
+        manager.mark_orphaned_if_idle("s1")
+        assert "s1" in manager._orphaned_at
+
+    def test_mark_orphaned_if_idle_не_перетирает_метку(self):
+        """Иначе сессия обновляла бы метку на каждом тике и никогда не созревала."""
+        old = time.time() - 600
+        manager._orphaned_at["s1"] = old
+        manager.mark_orphaned_if_idle("s1")
+        assert manager._orphaned_at["s1"] == old
+
+    def test_mark_orphaned_if_idle_молчит_при_живом_подключении(self):
+        ws = _fake_ws()
+        asyncio.run(manager.connect("s1", ws))
+        manager.mark_orphaned_if_idle("s1")
+        assert "s1" not in manager._orphaned_at
+
+
+class TestPurgeExpired:
+    @pytest.fixture
+    async def storage(self, tmp_path):
+        """Поднимает GameRegistry на временной БД и подсовывает его в state.storage."""
+        registry = GameRegistry()
+        await registry.init_db(str(tmp_path / "purge.db"))
+        previous, state.storage = state.storage, registry
+        yield registry
+        await registry.close()
+        state.storage = previous
+
+    @pytest.mark.asyncio
+    async def test_созревшая_веб_сессия_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time() - 600
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is None
+
+    @pytest.mark.asyncio
+    async def test_свежая_осиротевшая_не_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time()
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_сессия_с_подключением_не_удаляется(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager._orphaned_at["s1"] = time.time() - 600
+        manager.active_connections["s1"] = [_fake_ws()]
+
+        await purge_expired_sessions()
+
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_телеграм_игра_не_удаляется(self, storage):
+        """У игр из Telegram нет WebSocket вообще — правило «нет подключений» их не касается."""
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game("-100500", "s1", Initiator.from_web("bob"), "telegram-задача"))
+
+        await purge_expired_sessions()
+
+        # Сканирование БД идёт по WEB_CHAT_ID, поэтому чужой chat_id в перебор не попадает
+        # и метку не получает — иначе следующий тик удалил бы игру.
+        assert "s1" not in manager._orphaned_at
+
+        # Даже с созревшей меткой (например, веб-сессия с тем же game_id уже была)
+        # запись чужого чата остаётся на месте.
+        manager._orphaned_at["s1"] = time.time() - 600
+        await purge_expired_sessions()
+        assert await storage.get_game("-100500", "s1") is not None
+
+    @pytest.mark.asyncio
+    async def test_запись_без_метки_помечается_и_потом_удаляется(self, storage):
+        """Строка, пережившая перезапуск процесса или оставшаяся без сокета.
+
+        Метки в памяти нет, подключений нет — уборщик обязан восстановить метку
+        из БД, иначе такая запись живёт вечно вместе с содержимым задачи.
+        """
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+
+        # Первый тик: метки не было — она появляется, но ещё не созрела.
+        await purge_expired_sessions()
+        assert "s1" in manager._orphaned_at
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is not None
+
+        # Следующий тик, когда метка созрела.
+        manager._orphaned_at["s1"] = time.time() - 600
+        await purge_expired_sessions()
+        assert await storage.get_game(WEB_CHAT_ID, "s1") is None
+
+    @pytest.mark.asyncio
+    async def test_память_о_сессии_очищается(self, storage):
+        from app import purge_expired_sessions
+
+        await storage.save_game(storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача"))
+        manager.register_user("s1", "alice")
+        manager._orphaned_at["s1"] = time.time() - 600
+
+        await purge_expired_sessions()
+
+        assert "s1" not in manager._orphaned_at
+        assert "s1" not in manager.session_users
+
+
 class TestCleanupLoop:
     def test_loop_removes_stale_sessions(self):
         """session_cleanup_loop периодически вызывает cleanup_old_sessions."""
@@ -99,6 +290,27 @@ class TestCleanupLoop:
         asyncio.run(scenario())
 
         assert "live" in manager.session_users
+
+    def test_loop_чистит_память_даже_если_бд_недоступна(self):
+        """Сбой удаления из БД не должен отменять очистку памяти в том же тике."""
+        import asyncio
+        from unittest.mock import patch
+
+        from app import session_cleanup_loop
+
+        async def scenario():
+            manager.register_user("stale", "alice")
+
+            with patch("app.purge_expired_sessions", side_effect=RuntimeError("БД недоступна")):
+                task = asyncio.create_task(session_cleanup_loop(0.01))
+                await asyncio.sleep(0.05)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())
+
+        assert "stale" not in manager.session_users
 
     def test_loop_survives_failing_tick(self):
         """Сбой в одном тике не должен останавливать цикл очистки навсегда."""

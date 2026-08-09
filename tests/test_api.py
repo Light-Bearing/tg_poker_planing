@@ -13,7 +13,6 @@ from web_api import (
     api_get_custom_scale,
     api_get_session,
     api_kick_user,
-    api_list_sessions,
     api_restart,
     api_reveal,
     api_save_custom_scale,
@@ -57,7 +56,6 @@ def client():
     routes = [
         Route("/", web_index, methods=["GET"]),
         Route("/api/sessions", api_create_session, methods=["POST"]),
-        Route("/api/sessions", api_list_sessions, methods=["GET"]),
         Route("/api/sessions/{session_id}", api_get_session, methods=["GET"]),
         Route("/api/sessions/{session_id}/vote", api_vote, methods=["POST"]),
         Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"]),
@@ -123,23 +121,6 @@ class TestSessions:
     def test_get_session_not_found(self, client):
         resp = client.get("/api/sessions/nonexistent")
         assert resp.status_code == 404
-
-    def test_list_sessions_empty(self, client):
-        resp = client.get("/api/sessions")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["sessions"] == []
-        assert data["total"] == 0
-
-    def test_list_sessions(self, client):
-        client.post("/api/sessions", json={"username": "Alice", "text": "Task 1"})
-        client.post("/api/sessions", json={"username": "Bob", "text": "Task 2"})
-
-        resp = client.get("/api/sessions")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["sessions"]) == 2
-        assert data["total"] == 2
 
 
 class TestVoting:

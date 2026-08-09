@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 import state
-from config import CORS_ORIGINS, SESSION_CLEANUP_INTERVAL, logger
+from config import CORS_ORIGINS, SESSION_CLEANUP_INTERVAL, SESSION_TTL_SECONDS, WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import GameRegistry
 from telegram_bot import init_bot, telegram_webhook
@@ -19,7 +19,6 @@ from web_api import (
     api_get_custom_scale,
     api_get_session,
     api_kick_user,
-    api_list_sessions,
     api_restart,
     api_reveal,
     api_save_custom_scale,
@@ -48,6 +47,28 @@ async def shutdown_app(app: Starlette) -> None:
     logger.info("Shutdown complete")
 
 
+async def purge_expired_sessions() -> None:
+    """Удаляет веб-сессии, из которых все ушли дольше SESSION_TTL_SECONDS назад.
+
+    Только веб-сессии: у игр из Telegram нет WebSocket-подключений, и под правило
+    «нет подключений — удалить» они попадать не должны.
+    """
+    # Метки живут в памяти, поэтому записи, пережившие перезапуск процесса, и те,
+    # чей сокет так и не открылся, метки не имеют. Восстанавливаем её по одним
+    # идентификаторам: содержимое задач читать незачем.
+    for session_id in await state.storage.list_web_session_ids(WEB_CHAT_ID):
+        manager.mark_orphaned_if_idle(session_id)
+
+    for session_id in manager.orphaned_web_sessions(SESSION_TTL_SECONDS):
+        # Между итерациями цикл событий отдаёт управление, и кто-то мог успеть
+        # подключиться к сессии, попавшей в список.
+        if manager.active_connections.get(session_id):
+            continue
+        await state.storage.delete_game(WEB_CHAT_ID, session_id)
+        await manager.cleanup_session(session_id)
+        logger.info("Сессия %s удалена: участников нет дольше %.0f с", session_id, SESSION_TTL_SECONDS)
+
+
 async def session_cleanup_loop(interval: float) -> None:
     """Периодически убирает из памяти сессии без активных подключений
     и протухшие записи rate-limiter'а."""
@@ -56,6 +77,11 @@ async def session_cleanup_loop(interval: float) -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            try:
+                await purge_expired_sessions()
+            except Exception:
+                # Недоступная БД не должна отменять очистку памяти в этом же тике.
+                logger.exception("Не удалось удалить просроченные сессии")
             manager.cleanup_old_sessions()
             evict_stale_rate_limits()
         except Exception:
@@ -73,7 +99,6 @@ async def build_app():
         Route("/", web_index, methods=["GET"]),
         Route("/web", web_index, methods=["GET"]),
         Route("/api/sessions", api_create_session, methods=["POST"]),
-        Route("/api/sessions", api_list_sessions, methods=["GET"]),
         Route("/api/sessions/{session_id}", api_get_session, methods=["GET"]),
         Route("/api/sessions/{session_id}/vote", api_vote, methods=["POST"]),
         Route("/api/sessions/{session_id}/restart", api_restart, methods=["POST"]),
