@@ -176,7 +176,6 @@ class ConnectionManager:
             self.active_connections.pop(sid, None)
 
     @staticmethod
-    @staticmethod
     def _get_enriched_data(session_id: str, game: Optional["Game"] = None) -> dict:
         """Возвращает обогащённые данные сессии для broadcast.
         Если game=None — возвращает минимальный ответ."""
