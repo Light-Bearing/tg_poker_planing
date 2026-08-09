@@ -118,12 +118,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     # соединения её могли изменить другие участники.
                     game = await state.storage.get_game(WEB_CHAT_ID, session_id)
                     if msg_type == "join":
-                        username = validate_username(msg.get("username", ""))
-                        if not username:
+                        # Валидируем во временную переменную: отклонённый join не
+                        # должен затирать имя, под которым сокет уже вошёл, иначе
+                        # на disconnect соединение останется зарегистрированным.
+                        join_username = validate_username(msg.get("username", ""))
+                        if not join_username:
                             await websocket.send_json(
                                 {"type": "error", "message": "Недопустимое имя участника"}
                             )
                         else:
+                            username = join_username
                             is_new = manager.register_user(session_id, username)
                             manager.register_ws_connection(session_id, username, websocket)
                             if game:
