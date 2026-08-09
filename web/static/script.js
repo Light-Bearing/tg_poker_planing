@@ -40,14 +40,16 @@ class ToastManager {
         if (!this.container) this.init();
         
         const icons = { success: '✓', error: '✕', warning: '⚠', info: 'ℹ' };
+        const safeTitle = escapeHtml(title);
+        const safeMessage = escapeHtml(message);
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         toast.setAttribute('role', 'alert');
         toast.innerHTML = `
             <div class="toast-icon">${icons[type] || 'ℹ'}</div>
             <div class="toast-body">
-                <div class="toast-title">${title}</div>
-                <div class="toast-message">${message}</div>
+                <div class="toast-title">${safeTitle}</div>
+                <div class="toast-message">${safeMessage}</div>
             </div>
             <button class="toast-close" onclick="this.parentElement.remove()">✕</button>
             <div class="toast-progress" style="animation-duration: ${duration}ms;"></div>
@@ -1437,6 +1439,32 @@ function onJoinScaleClick(scaleName) {
     renderScalePoints(scaleName);
 }
 
+function renderSessionScaleSelector(session) {
+    const container = document.getElementById('sessionScaleSelector');
+    const buttonsContainer = document.getElementById('sessionScaleSelectorButtons');
+    if (!container || !buttonsContainer) return;
+
+    const scaleNames = session.scale_names || SERVER_SCALE_NAMES || {};
+    let entries = Object.entries(scaleNames);
+    if (entries.length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    // Сортируем: custom — в конец (как на экране входа)
+    entries.sort((a, b) => {
+        if (a[0] === 'custom') return 1;
+        if (b[0] === 'custom') return -1;
+        return 0;
+    });
+
+    container.style.display = 'flex';
+    buttonsContainer.innerHTML = entries.map(([key, label]) => {
+        const active = key === session.scale_name ? 'active' : '';
+        return `<button class="scale-btn ${active}" data-scale="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+    }).join('');
+}
+
 // ==================== CUSTOM SCALE EDITOR ====================
 let customScaleBuffer = [];
 
@@ -1887,7 +1915,25 @@ document.addEventListener('DOMContentLoaded', () => {
     renderJoinScaleSelector();
     renderScalePoints(CURRENT_SCALE_NAME);
     renderRecentRooms();
-    
+
+    // Kick-кнопки рисуются динамически, поэтому слушатель вешается на контейнер.
+    // dataset автоматически декодирует HTML-сущности, возвращая исходное имя.
+    const participantsList = document.getElementById('participantsList');
+    if (participantsList) {
+        participantsList.addEventListener('click', (e) => {
+            const btn = e.target.closest('.kick-btn');
+            if (btn) kickParticipant(btn.dataset.username);
+        });
+    }
+
+    const sessionScaleButtons = document.getElementById('sessionScaleSelectorButtons');
+    if (sessionScaleButtons) {
+        sessionScaleButtons.addEventListener('click', (e) => {
+            const btn = e.target.closest('.scale-btn');
+            if (btn) setScale(btn.dataset.scale);
+        });
+    }
+
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
     if (state.soundEnabled) {
         // AudioContext создается при первом клике пользователя (требование браузеров)
@@ -2206,6 +2252,9 @@ function connectWebSocket(sessionId) {
                 // НЕ показываем уведомление о выходе - это может быть временный разрыв
                 // soundManager.playLeave();
                 updateSessionDisplay(message.data);
+            } else if (message.type === 'error') {
+                toast.error(message.message || 'Ошибка сервера', 'ОШИБКА');
+                return;
             } else if (message.type === 'kicked') {
                 toast.error(message.message || 'Вы были исключены из комнаты', 'ИСКЛЮЧЕНИЕ');
                 setTimeout(() => leaveSession(), 2000);
@@ -2249,8 +2298,13 @@ function updateConnectionStatus(status) {
 }
 
 function setScale(scaleName) {
+    if (!state.isInitiator) return;
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({ type: 'set_scale', scale_name: scaleName }));
+        state.ws.send(JSON.stringify({
+            type: 'set_scale',
+            scale_name: scaleName,
+            username: state.username
+        }));
     }
 }
 
@@ -2286,6 +2340,60 @@ function toggleAutoReveal() {
         toast.error('Не удалось изменить настройку', 'ОШИБКА');
         checkbox.checked = !autoReveal;
     });
+}
+
+// ========== СОБСТВЕННЫЙ ВЫБОР (подсветка своей карты) ==========
+// До вскрытия сервер намеренно не отдаёт real_point (тайна голосования),
+// поэтому свой выбор помним на клиенте и переживаем перезагрузку страницы.
+function myVoteStorageKey() {
+    if (!state.sessionId || !state.username) return null;
+    return `pp_my_vote_${state.sessionId}_${state.username}`;
+}
+
+function rememberMyVote(point) {
+    state.selectedPoint = point || null;
+    const key = myVoteStorageKey();
+    if (!key) return;
+    try {
+        if (state.selectedPoint === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, state.selectedPoint);
+    } catch (e) {
+        // localStorage недоступен (приватный режим) — обходимся памятью
+    }
+}
+
+function readStoredVote() {
+    const key = myVoteStorageKey();
+    if (!key) return null;
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        return null;
+    }
+}
+
+function highlightSelectedCard() {
+    document.querySelectorAll('.point-btn').forEach(b => {
+        b.classList.toggle('selected', b.dataset.point === state.selectedPoint);
+    });
+}
+
+// Синхронизирует state.selectedPoint с состоянием сессии перед отрисовкой грида.
+function syncMyVoteFromSession(session) {
+    const myVote = (session.votes || []).find(v => v.user_id === `web_${state.username}`);
+    if (!myVote) {
+        // Голоса нет: рестарт раунда или смена шкалы — старая подсветка неверна.
+        rememberMyVote(null);
+    } else if (myVote.real_point) {
+        // Карты вскрыты — сервер отдал реальное значение, берём его как истину.
+        rememberMyVote(myVote.real_point);
+    } else if (state.selectedPoint === null) {
+        // Голос есть, но значение скрыто: восстанавливаем свой выбор из хранилища.
+        state.selectedPoint = readStoredVote();
+    }
+    if (state.selectedPoint !== null && !(session.available_points || []).includes(state.selectedPoint)) {
+        rememberMyVote(null);
+    }
 }
 
 function updateSessionDisplay(session) {
@@ -2371,6 +2479,7 @@ function updateSessionDisplay(session) {
     document.getElementById('jiraBtn').classList.remove('hidden');
     updateJiraHeaderBtn();
     
+    syncMyVoteFromSession(session);
     const grid = document.getElementById('pointsGrid');
     grid.innerHTML = '';
     session.available_points.forEach(point => {
@@ -2379,15 +2488,10 @@ function updateSessionDisplay(session) {
         btn.textContent = point;
         btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
-        
-        const myVote = session.votes.find(v => v.user_id === `web_${state.username}`);
-        if (myVote && myVote.real_point === point) {
-            btn.classList.add('selected');
-            state.selectedPoint = point;
-        }
         grid.appendChild(btn);
     });
-    
+    highlightSelectedCard();
+
     document.getElementById('voteCount').textContent = session.vote_count;
     const averageCard = document.getElementById('averageCard');
     const resultCard = document.getElementById('resultCard');
@@ -2442,7 +2546,8 @@ function updateSessionDisplay(session) {
     
     const controlCard = document.getElementById('initiatorControlCard');
     controlCard.style.display = state.isInitiator ? 'block' : 'none';
-    
+    if (state.isInitiator) renderSessionScaleSelector(session);
+
     const votingSection = document.getElementById('votingSection');
     votingSection.style.opacity = session.revealed ? '0.4' : '1';
     votingSection.style.pointerEvents = session.revealed ? 'none' : 'auto';
@@ -2502,6 +2607,7 @@ function renderParticipants(session) {
     }
 
     grid.innerHTML = pList.map(p => {
+        const safeName = escapeHtml(p.username);
         let voteDisplay;
         if (!p.vote) {
             voteDisplay = '<span class="vote-status pending">ОЖИДАЕТ</span>';
@@ -2521,7 +2627,8 @@ function renderParticipants(session) {
                 }
             }
             
-            voteDisplay = `<span class="vote-value revealed${extraClass}">${point}</span>`;
+            // extraClass — внутреннее значение, а point приходит из шкалы: экранируем
+            voteDisplay = `<span class="vote-value revealed${extraClass}">${escapeHtml(point)}</span>`;
         }
 
         const hasVoted = !!p.vote;
@@ -2530,9 +2637,9 @@ function renderParticipants(session) {
             <div class="participant-card ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''} ${votedClass}">
                 <div class="participant-card-header">
                     <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
-                    <span class="participant-name" title="${p.username}">${p.username}</span>
+                    <span class="participant-name" title="${safeName}">${safeName}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
-                    ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${p.username}" onclick="kickParticipant('${p.username}')" title="Исключить">✕</button>` : ''}
+                    ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${safeName}" title="Исключить">✕</button>` : ''}
                     ${!session.revealed && hasVoted ? '<span class="vote-dot" title="Проголосовал"></span>' : ''}
                 </div>
                 <div class="participant-vote-area">
@@ -2573,7 +2680,7 @@ function renderHistogram(session) {
         const isSpecial = SPECIAL_POINTS.includes(point);
         return `
             <div class="histogram-row">
-                <span class="histogram-label ${isSpecial ? 'special' : ''}">${point}</span>
+                <span class="histogram-label ${isSpecial ? 'special' : ''}">${escapeHtml(point)}</span>
                 <div class="histogram-bar-track">
                     <div class="histogram-bar" style="width: ${pct}%"></div>
                 </div>
@@ -2585,11 +2692,11 @@ function renderHistogram(session) {
 
 async function castVote(point) {
     if (!state.sessionId) return;
-    const btn = document.querySelector(`.point-btn[data-point="${point}"]`);
-    if (btn) {
-        document.querySelectorAll('.point-btn').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-    }
+    const previousPoint = state.selectedPoint;
+    // Запоминаем выбор сразу: свой голос обратно не приходит (real_point скрыт
+    // до вскрытия), а грид перерисовывается на каждом broadcast.
+    rememberMyVote(point);
+    highlightSelectedCard();
     try {
         const response = await fetch(`/api/sessions/${state.sessionId}/vote`, {
             method: 'POST',
@@ -2599,13 +2706,15 @@ async function castVote(point) {
         if (!response.ok) {
             const err = await response.json();
             toast.error(err.error || 'Неизвестная ошибка', 'ОШИБКА ГОЛОСА');
-            if (btn) btn.classList.remove('selected');
+            rememberMyVote(previousPoint);
+            highlightSelectedCard();
         } else {
             soundManager.playVote();
         }
-    } catch (error) { 
+    } catch (error) {
         toast.error(error.message, 'НЕТ СВЯЗИ');
-        if (btn) btn.classList.remove('selected');
+        rememberMyVote(previousPoint);
+        highlightSelectedCard();
     }
 }
 

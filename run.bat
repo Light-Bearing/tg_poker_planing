@@ -3,7 +3,7 @@
 set NAME=wmsout_planing_poker_bot
 set DB_LOCATION=C:\db
 set DB_NAME=tg_pp_bot.db
-set PP_BOT_TOKEN="PP_BOT_TOKEN_REMOVED"
+set PP_BOT_TOKEN="your_telegram_bot_token_here"
 
 # Построение образа Docker
 docker build -t %NAME% .

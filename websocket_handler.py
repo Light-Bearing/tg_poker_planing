@@ -7,7 +7,7 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import SCALES, Initiator
-from web_api import enrich_session_response, process_web_vote
+from web_api import enrich_session_response, process_web_vote, validate_username
 
 
 async def check_auto_reveal(session_id: str, game):
@@ -114,9 +114,20 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     msg = json.loads(data)
                     msg_type = msg.get("type")
+                    # Читаем игру заново на каждое сообщение: за время жизни
+                    # соединения её могли изменить другие участники.
+                    game = await state.storage.get_game(WEB_CHAT_ID, session_id)
                     if msg_type == "join":
-                        username = msg.get("username")
-                        if username:
+                        # Валидируем во временную переменную: отклонённый join не
+                        # должен затирать имя, под которым сокет уже вошёл, иначе
+                        # на disconnect соединение останется зарегистрированным.
+                        join_username = validate_username(msg.get("username", ""))
+                        if not join_username:
+                            await websocket.send_json(
+                                {"type": "error", "message": "Недопустимое имя участника"}
+                            )
+                        else:
+                            username = join_username
                             is_new = manager.register_user(session_id, username)
                             manager.register_ws_connection(session_id, username, websocket)
                             if game:
@@ -142,16 +153,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     elif msg_type == "set_scale":
                         scale_name = msg.get("scale_name", "")
                         setter_username = msg.get("username", "")
-                        if game and scale_name in SCALES:
+                        if game:
                             # Только инициатор может менять шкалу
                             if f"web_{setter_username}" != game.initiator.id:
                                 logger.warning(f"User {setter_username} is not initiator, cannot change scale")
                                 await websocket.send_json(
                                     {"type": "error", "message": "Только инициатор может менять шкалу"}
                                 )
+                            elif scale_name not in SCALES:
+                                # Молча игнорировать нельзя: клиент решит, что шкала сменилась
+                                logger.warning(f"Unknown scale_name {scale_name!r} from {setter_username}")
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Неизвестная шкала оценок"}
+                                )
                             else:
                                 game.scale_name = scale_name
+                                game.restart()
                                 await state.storage.save_game(game)
+                                manager.reset_session_users(session_id)
                                 await manager.broadcast(
                                     session_id,
                                     {"type": "update", "data": enrich_session_response(game, session_id)},
@@ -195,9 +214,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                     )
                     elif msg_type == "vote":
                         point = msg.get("point")
-                        vote_username = msg.get("username")
-                        if game and vote_username and point:
-                            if point not in game.get_points():
+                        raw_vote_username = msg.get("username")
+                        if game and raw_vote_username and point:
+                            vote_username = validate_username(raw_vote_username)
+                            if not vote_username:
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Недопустимое имя участника"}
+                                )
+                            elif point not in game.get_points():
                                 err_msg = f"Point '{point}' is not in the current scale" f" ({game.scale_name})"
                                 await websocket.send_json({"type": "error", "message": err_msg})
                             else:

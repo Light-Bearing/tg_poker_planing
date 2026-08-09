@@ -54,3 +54,76 @@ class TestSessionCleanup:
 
         assert "s1" not in manager.session_users
         assert "s1" not in manager.active_connections
+
+
+class TestCleanupLoop:
+    def test_loop_removes_stale_sessions(self):
+        """session_cleanup_loop периодически вызывает cleanup_old_sessions."""
+        import asyncio
+
+        from app import session_cleanup_loop
+
+        async def scenario():
+            manager.register_user("stale", "alice")
+            manager.ws_username_map["stale"] = {"alice"}
+            manager._ws_connections["stale"] = {"alice": None}
+            # активных подключений нет → сессия считается протухшей
+
+            task = asyncio.create_task(session_cleanup_loop(0.01))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(scenario())
+
+        assert "stale" not in manager.session_users
+        assert "stale" not in manager.ws_username_map
+        assert "stale" not in manager._ws_connections
+
+    def test_loop_keeps_sessions_with_active_connections(self):
+        import asyncio
+
+        from app import session_cleanup_loop
+
+        async def scenario():
+            manager.register_user("live", "alice")
+            manager.active_connections["live"] = ["fake-ws"]
+
+            task = asyncio.create_task(session_cleanup_loop(0.01))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(scenario())
+
+        assert "live" in manager.session_users
+
+    def test_loop_survives_failing_tick(self):
+        """Сбой в одном тике не должен останавливать цикл очистки навсегда."""
+        import asyncio
+        from unittest.mock import patch
+
+        from app import session_cleanup_loop
+
+        calls = []
+
+        def flaky_cleanup():
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+
+        async def scenario():
+            with patch.object(manager, "cleanup_old_sessions", side_effect=flaky_cleanup):
+                task = asyncio.create_task(session_cleanup_loop(0.01))
+                await asyncio.sleep(0.05)
+
+                assert not task.done()
+                assert len(calls) > 1
+
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(scenario())

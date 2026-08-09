@@ -45,6 +45,25 @@ class TestBuildApp:
             assert "/healthcheck" in routes
 
     @pytest.mark.asyncio
+    async def test_build_app_exposes_custom_scale_under_api_prefix(self):
+        """The frontend calls /api/custom-scale (web/static/script.js); the real
+        app must register the custom-scale routes under that path, not the bare
+        /custom-scale path, or saving a custom scale 404s in production."""
+        with (
+            patch("app.init_bot", new=AsyncMock()),
+            patch("app.GameRegistry"),
+            patch("app.Jinja2Templates"),
+            patch("os.path.exists", return_value=False),
+        ):
+            from app import build_app
+
+            app = await build_app()
+            custom_scale_routes = [r for r in app.routes if getattr(r, "path", None) == "/api/custom-scale"]
+            methods_seen = {m for r in custom_scale_routes for m in (r.methods or set())}
+            assert "GET" in methods_seen, "GET /api/custom-scale must be registered for reading a saved scale"
+            assert "POST" in methods_seen, "POST /api/custom-scale must be registered for saving a custom scale"
+
+    @pytest.mark.asyncio
     async def test_build_app_calls_init_bot(self):
         init_bot_mock = AsyncMock()
         with (
@@ -359,7 +378,7 @@ class TestGameToWebResponse:
         result = game_to_web_response(game, "s1")
         assert result["vote_count"] == 1
         assert result["votes"][0]["point"] == "♥"  # masked, not revealed
-        assert result["votes"][0]["real_point"] == "5"
+        assert "real_point" not in result["votes"][0]
 
     def test_game_to_web_response_revealed(self):
         from ppbot.game import Game
@@ -378,6 +397,46 @@ class TestGameToWebResponse:
         game = Game(-100, "s1", {"id": 123, "first_name": "A"}, "task")
         result = game_to_web_response(game, "s1")
         assert result["initiator"] == "123"
+
+    def test_real_point_present_after_reveal(self):
+        from ppbot.game import Game
+        from web_api import game_to_web_response
+
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "a"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "a"}, "5")
+        game.revealed = True
+        result = game_to_web_response(game, "s1")
+        assert result["votes"][0]["real_point"] == "5"
+        assert result["votes"][0]["point"] == "5"
+
+    def test_enriched_participants_hide_real_point_before_reveal(self):
+        from connection import manager
+        from ppbot.game import Game
+        from web_api import enrich_session_response
+
+        manager.session_users.clear()
+        manager.register_user("s1", "alice")
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "8")
+
+        result = enrich_session_response(game, "s1")
+        participant = next(p for p in result["participants"] if p["username"] == "alice")
+        assert "real_point" not in participant["vote"]
+        manager.session_users.clear()
+
+    def test_average_hidden_until_reveal(self):
+        from ppbot.game import Game
+        from web_api import game_to_web_response
+
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "a"}, "task")
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "a"}, "5")
+        result = game_to_web_response(game, "s1")
+        assert "average" not in result, "average must be hidden before reveal"
+
+        game.revealed = True
+        result = game_to_web_response(game, "s1")
+        assert "average" in result, "average must be present after reveal"
+        assert result["average"] == 5.0
 
 
 class TestEnrichSessionResponse:
@@ -647,3 +706,86 @@ class TestAPIErrorHandling:
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
+
+
+class TestValidateUsername:
+    def test_accepts_plain_latin(self):
+        from web_api import validate_username
+
+        assert validate_username("alice") == "alice"
+
+    def test_accepts_cyrillic(self):
+        from web_api import validate_username
+
+        assert validate_username("Аня") == "Аня"
+
+    def test_accepts_spaces_hyphen_dot_underscore(self):
+        from web_api import validate_username
+
+        assert validate_username("Jean-Luc P. ivanov_1") == "Jean-Luc P. ivanov_1"
+
+    def test_strips_surrounding_whitespace(self):
+        from web_api import validate_username
+
+        assert validate_username("  bob  ") == "bob"
+
+    def test_rejects_empty(self):
+        from web_api import validate_username
+
+        assert validate_username("") is None
+        assert validate_username("   ") is None
+
+    def test_rejects_html_tags(self):
+        from web_api import validate_username
+
+        assert validate_username("<img src=x onerror=alert(1)>") is None
+
+    def test_rejects_quote_used_for_js_breakout(self):
+        from web_api import validate_username
+
+        assert validate_username("'),alert(1)//") is None
+
+    def test_rejects_newline(self):
+        from web_api import validate_username
+
+        assert validate_username("bob\nadmin") is None
+
+    def test_rejects_too_long(self):
+        from web_api import validate_username
+
+        assert validate_username("a" * 33) is None
+
+    def test_accepts_max_length(self):
+        from web_api import validate_username
+
+        assert validate_username("a" * 32) == "a" * 32
+
+
+class TestRateLimitEviction:
+    def test_evict_removes_idle_keys(self):
+        import time
+
+        import web_api
+        from web_api import _check_rate_limit, evict_stale_rate_limits, reset_rate_limits
+
+        reset_rate_limits()
+        _check_rate_limit("ip:1.2.3.4", max_requests=5, window=0.01)
+        assert "ip:1.2.3.4" in web_api._rate_limit_store
+
+        time.sleep(0.02)  # единственная метка этого ключа устарела
+        evict_stale_rate_limits(window=0.01)
+
+        assert "ip:1.2.3.4" not in web_api._rate_limit_store
+        reset_rate_limits()
+
+    def test_evict_keeps_recent_keys(self):
+        import web_api
+        from web_api import _check_rate_limit, evict_stale_rate_limits, reset_rate_limits
+
+        reset_rate_limits()
+        _check_rate_limit("ip:9.9.9.9", max_requests=5, window=60)
+
+        evict_stale_rate_limits(window=60)
+
+        assert "ip:9.9.9.9" in web_api._rate_limit_store
+        reset_rate_limits()

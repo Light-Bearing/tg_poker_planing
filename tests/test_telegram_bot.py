@@ -22,10 +22,11 @@ from telegram_bot import (
 
 @pytest.fixture(autouse=True)
 def _setup_state(tmp_path):
-    state.storage = GameRegistry()
+    registry = GameRegistry()
+    state.storage = registry
 
     async def _init():
-        await state.storage.init_db(str(tmp_path / "test.db"))
+        await registry.init_db(str(tmp_path / "test.db"))
 
     import asyncio
 
@@ -33,7 +34,7 @@ def _setup_state(tmp_path):
     yield
 
     async def _close():
-        await state.storage.close()
+        await registry.close()
 
     asyncio.run(_close())
 
