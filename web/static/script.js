@@ -1887,7 +1887,17 @@ document.addEventListener('DOMContentLoaded', () => {
     renderJoinScaleSelector();
     renderScalePoints(CURRENT_SCALE_NAME);
     renderRecentRooms();
-    
+
+    // Kick-кнопки рисуются динамически, поэтому слушатель вешается на контейнер.
+    // dataset автоматически декодирует HTML-сущности, возвращая исходное имя.
+    const participantsList = document.getElementById('participantsList');
+    if (participantsList) {
+        participantsList.addEventListener('click', (e) => {
+            const btn = e.target.closest('.kick-btn');
+            if (btn) kickParticipant(btn.dataset.username);
+        });
+    }
+
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
     if (state.soundEnabled) {
         // AudioContext создается при первом клике пользователя (требование браузеров)
@@ -2502,6 +2512,7 @@ function renderParticipants(session) {
     }
 
     grid.innerHTML = pList.map(p => {
+        const safeName = escapeHtml(p.username);
         let voteDisplay;
         if (!p.vote) {
             voteDisplay = '<span class="vote-status pending">ОЖИДАЕТ</span>';
@@ -2530,9 +2541,9 @@ function renderParticipants(session) {
             <div class="participant-card ${p.online ? 'online' : 'offline'} ${p.isYou ? 'you' : ''} ${votedClass}">
                 <div class="participant-card-header">
                     <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
-                    <span class="participant-name" title="${p.username}">${p.username}</span>
+                    <span class="participant-name" title="${safeName}">${safeName}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
-                    ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${p.username}" onclick="kickParticipant('${p.username}')" title="Исключить">✕</button>` : ''}
+                    ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${safeName}" title="Исключить">✕</button>` : ''}
                     ${!session.revealed && hasVoted ? '<span class="vote-dot" title="Проголосовал"></span>' : ''}
                 </div>
                 <div class="participant-vote-area">
