@@ -5,10 +5,16 @@
     'use strict';
 
     // ========== UTILITY ==========
+    // Чистая реализация: не требует DOM (нужно для запуска в Node) и, в отличие
+    // от прежней через createElement, экранирует кавычки — результат подставляется
+    // в том числе в значения атрибутов.
     function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
 
     // ========== TEXT MARKS ==========
@@ -250,7 +256,7 @@
     }
 
     // ========== ENTRY POINT ==========
-    window.parseJiraDescription = function parseJiraDescription(desc) {
+    function parseJiraDescription(desc) {
         if (!desc) return '';
         if (typeof desc === 'object' && desc !== null && desc.type === 'doc') {
             return adfToHtml(desc);
@@ -259,5 +265,15 @@
             return parseWikiMarkup(desc);
         }
         return escapeHtml(String(desc));
-    };
+    }
+
+    if (typeof window !== 'undefined') {
+        window.parseJiraDescription = parseJiraDescription;
+    }
+
+    // Файл работает и как обычный <script> на странице, и как модуль в Node —
+    // это нужно, чтобы парсер можно было тестировать без браузера и без сборщика.
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { parseJiraDescription, escapeHtml };
+    }
 })();
