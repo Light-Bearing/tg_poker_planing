@@ -67,6 +67,8 @@ pip install -r requirements.txt
 
 Создайте файл `.env` в корне проекта:
 
+⚠️ **Никогда не коммитьте `.env` и не вписывайте реальные токены в `.env.example`.** `.env` уже в `.gitignore`. В репозитории настроен hook `gitleaks` — установите его командой `pre-commit install`, чтобы коммит с секретом не прошёл. Если токен всё же попал в историю, его нужно отозвать: для бота — команда `/revoke` у [@BotFather](https://t.me/BotFather).
+
 ```bash
 # Обязательные переменные
 TELEGRAM_BOT_TOKEN=ваш_токен_бота_от_BotFather
