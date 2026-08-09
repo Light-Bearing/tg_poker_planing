@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 from contextlib import suppress
@@ -31,6 +32,22 @@ def _check_rate_limit(key: str, max_requests: int = 30, window: float = 60.0) ->
     timestamps.append(now)
     _rate_limit_store[key] = timestamps
     return True
+
+
+# ========== USERNAME VALIDATION ==========
+# \w покрывает буквы любого алфавита и цифры; дополнительно разрешены пробел,
+# дефис и точка. Всё остальное (< > " ' & перевод строки) отсекается, потому что
+# имя попадает в HTML и в JS-контекст на фронте.
+USERNAME_RE = re.compile(r"[\w \-.]{1,32}", re.UNICODE)
+USERNAME_ERROR = "Username must be 1-32 characters: letters, digits, spaces, - . _"
+
+
+def validate_username(raw: str) -> str | None:
+    """Нормализует имя участника. Возвращает None, если имя недопустимо."""
+    name = (raw or "").strip()
+    if not USERNAME_RE.fullmatch(name):
+        return None
+    return name
 
 
 def game_to_web_response(game: Game, session_id: str) -> dict:
@@ -106,9 +123,10 @@ async def web_index(request: Request):
 async def api_create_session(request: Request):
     try:
         data = await request.json()
-        username, text = data.get("username", "").strip(), data.get("text", "").strip()
+        username = validate_username(data.get("username", ""))
+        text = data.get("text", "").strip()
         if not username:
-            return JSONResponse({"error": "Username is required"}, status_code=400)
+            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
         if not text:
             return JSONResponse({"error": "Task description is required"}, status_code=400)
 
@@ -229,8 +247,11 @@ async def api_vote(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username, point = data.get("username", "").strip(), data.get("point", "").strip()
-        if not username or not point:
+        username = validate_username(data.get("username", ""))
+        point = data.get("point", "").strip()
+        if not username:
+            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
+        if not point:
             return JSONResponse({"error": "Username and point are required"}, status_code=400)
 
         # Rate limit
@@ -261,7 +282,10 @@ async def api_restart(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username, new_text = data.get("username", "").strip(), data.get("new_text", "").strip()
+        username = validate_username(data.get("username", ""))
+        new_text = data.get("new_text", "").strip()
+        if not username:
+            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -285,7 +309,9 @@ async def api_reveal(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = data.get("username", "").strip()
+        username = validate_username(data.get("username", ""))
+        if not username:
+            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -305,10 +331,10 @@ async def api_kick_user(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = data.get("username", "").strip()
-        target_username = data.get("target_username", "").strip()
+        username = validate_username(data.get("username", ""))
+        target_username = validate_username(data.get("target_username", ""))
         if not username or not target_username:
-            return JSONResponse({"error": "username and target_username are required"}, status_code=400)
+            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:

@@ -647,3 +647,56 @@ class TestAPIErrorHandling:
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
+
+
+class TestValidateUsername:
+    def test_accepts_plain_latin(self):
+        from web_api import validate_username
+
+        assert validate_username("alice") == "alice"
+
+    def test_accepts_cyrillic(self):
+        from web_api import validate_username
+
+        assert validate_username("Аня") == "Аня"
+
+    def test_accepts_spaces_hyphen_dot_underscore(self):
+        from web_api import validate_username
+
+        assert validate_username("Jean-Luc P. ivanov_1") == "Jean-Luc P. ivanov_1"
+
+    def test_strips_surrounding_whitespace(self):
+        from web_api import validate_username
+
+        assert validate_username("  bob  ") == "bob"
+
+    def test_rejects_empty(self):
+        from web_api import validate_username
+
+        assert validate_username("") is None
+        assert validate_username("   ") is None
+
+    def test_rejects_html_tags(self):
+        from web_api import validate_username
+
+        assert validate_username("<img src=x onerror=alert(1)>") is None
+
+    def test_rejects_quote_used_for_js_breakout(self):
+        from web_api import validate_username
+
+        assert validate_username("'),alert(1)//") is None
+
+    def test_rejects_newline(self):
+        from web_api import validate_username
+
+        assert validate_username("bob\nadmin") is None
+
+    def test_rejects_too_long(self):
+        from web_api import validate_username
+
+        assert validate_username("a" * 33) is None
+
+    def test_accepts_max_length(self):
+        from web_api import validate_username
+
+        assert validate_username("a" * 32) == "a" * 32

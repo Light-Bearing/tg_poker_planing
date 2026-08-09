@@ -459,3 +459,34 @@ class TestAutoRevealApi:
         assert resp.status_code == 200
         data = resp.json()
         assert data["auto_reveal"] is True
+
+
+BAD_NAME = "<img src=x onerror=alert(1)>"
+NAME_ERROR = "Username must be 1-32 characters: letters, digits, spaces, - . _"
+
+
+class TestUsernameValidation:
+    def test_create_session_rejects_bad_username(self, client):
+        r = client.post("/api/sessions", json={"username": BAD_NAME, "text": "task"})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_create_session_accepts_cyrillic(self, client):
+        r = client.post("/api/sessions", json={"username": "Аня", "text": "task"})
+        assert r.status_code == 200
+        assert r.json()["initiator_name"] == "Аня"
+
+    def test_vote_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/vote", json={"username": BAD_NAME, "point": "5"})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_kick_rejects_bad_target_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(
+            f"/api/sessions/{created['session_id']}/kick",
+            json={"username": "alice", "target_username": BAD_NAME},
+        )
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
