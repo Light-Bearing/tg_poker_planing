@@ -232,7 +232,176 @@
         return nodes;
     }
 
+    // --- Блочный разбор ---------------------------------------------------
+    // Строки идут по порядку с индексом i; каждое правило обязано продвинуть
+    // i (или делегировать это collectBlockBody), иначе цикл зациклится.
+
+    const CODE_OPEN_RE = /^\{code(?::([^}]*))?\}/;
+    const NOFORMAT_OPEN = '{noformat}';
+    const QUOTE_OPEN = '{quote}';
+    const PANEL_OPEN_RE = /^\{panel(?::([^}]*))?\}/;
+    const RULE_RE = /^-{4,}$/;
+    const HEADING_RE = /^h([1-6])\.\s(.*)$/;
+    const LIST_MARKER_RE = /^[*\-#]+\s/;
+
+    // Собирает содержимое парной конструкции ({code}...{code}, {quote}...{quote}
+    // и т.п.), открытой в lines[i] маркером длиной openLen, до строки с
+    // closeMarker. Если открытие и закрытие оказались на одной строке
+    // (`{code}x{code}`), это обрабатывается отдельно, как того требует бриф.
+    // Хвост после закрывающего маркера на той же строке, где бы он ни
+    // нашёлся, вставляется как отдельная "строка" сразу за текущей позицией —
+    // так следующая итерация разберёт его по обычным правилам.
+    // Если закрытия нет вообще, поглощается всё до конца ввода.
+    function collectBlockBody(lines, i, openLen, closeMarker) {
+        const firstRest = lines[i].slice(openLen);
+        const sameLineClose = firstRest.indexOf(closeMarker);
+        if (sameLineClose !== -1) {
+            const text = firstRest.slice(0, sameLineClose);
+            const leftover = firstRest.slice(sameLineClose + closeMarker.length);
+            if (leftover !== '') lines.splice(i + 1, 0, leftover);
+            return { lines: [text], nextIndex: i + 1 };
+        }
+
+        const contentLines = [];
+        if (firstRest !== '') contentLines.push(firstRest);
+
+        let j = i + 1;
+        while (j < lines.length) {
+            const closeIdx = lines[j].indexOf(closeMarker);
+            if (closeIdx !== -1) {
+                const before = lines[j].slice(0, closeIdx);
+                if (before !== '') contentLines.push(before);
+                const leftover = lines[j].slice(closeIdx + closeMarker.length);
+                if (leftover !== '') lines.splice(j + 1, 0, leftover);
+                return { lines: contentLines, nextIndex: j + 1 };
+            }
+            contentLines.push(lines[j]);
+            j += 1;
+        }
+        // Закрытия не нашлось — поглощаем всё до конца ввода.
+        return { lines: contentLines, nextIndex: j };
+    }
+
+    // Обрезает пустые строки по краям массива, не трогая содержимое внутри.
+    function trimBlankEdges(lines) {
+        const result = lines.slice();
+        while (result.length && result[0].trim() === '') result.shift();
+        while (result.length && result[result.length - 1].trim() === '') result.pop();
+        return result;
+    }
+
+    function parseBlocks(text) {
+        const lines = text.split('\n');
+        const blocks = [];
+        let paragraphLines = [];
+
+        function flushParagraph() {
+            if (paragraphLines.length) {
+                blocks.push({ type: 'paragraph', text: paragraphLines.join('\n') });
+                paragraphLines = [];
+            }
+        }
+
+        let i = 0;
+        while (i < lines.length) {
+            const line = lines[i];
+
+            // 1. {code} / {code:язык} / {noformat}.
+            const codeMatch = CODE_OPEN_RE.exec(line);
+            const isNoformat = !codeMatch && line.startsWith(NOFORMAT_OPEN);
+            if (codeMatch || isNoformat) {
+                flushParagraph();
+                const language = codeMatch ? (codeMatch[1] || null) : null;
+                const openLen = codeMatch ? codeMatch[0].length : NOFORMAT_OPEN.length;
+                const closeMarker = codeMatch ? '{code}' : NOFORMAT_OPEN;
+                const body = collectBlockBody(lines, i, openLen, closeMarker);
+                const contentLines = trimBlankEdges(body.lines);
+                blocks.push({ type: 'code', text: contentLines.join('\n'), language: language });
+                i = body.nextIndex;
+                continue;
+            }
+
+            // 2. {quote}...{quote} и {panel[:title=...]}...{panel} — содержимое
+            // разбирается рекурсивным вызовом parseBlocks.
+            const panelMatch = PANEL_OPEN_RE.exec(line);
+            const isQuote = !panelMatch && line.startsWith(QUOTE_OPEN);
+            if (panelMatch || isQuote) {
+                flushParagraph();
+                let title = null;
+                let openLen;
+                let closeMarker;
+                if (panelMatch) {
+                    openLen = panelMatch[0].length;
+                    closeMarker = '{panel}';
+                    if (panelMatch[1]) {
+                        const titleMatch = /title=([^}]*)/.exec(panelMatch[1]);
+                        if (titleMatch) title = titleMatch[1];
+                    }
+                } else {
+                    openLen = QUOTE_OPEN.length;
+                    closeMarker = QUOTE_OPEN;
+                }
+                const body = collectBlockBody(lines, i, openLen, closeMarker);
+                const innerBlocks = parseBlocks(body.lines.join('\n'));
+                if (panelMatch) {
+                    blocks.push({ type: 'panel', title: title, blocks: innerBlocks });
+                } else {
+                    blocks.push({ type: 'quote', blocks: innerBlocks });
+                }
+                i = body.nextIndex;
+                continue;
+            }
+
+            // 3. ---- (строка целиком из четырёх и более дефисов).
+            if (RULE_RE.test(line)) {
+                flushParagraph();
+                blocks.push({ type: 'rule' });
+                i += 1;
+                continue;
+            }
+
+            // 4. h1.–h6. плюс пробел.
+            const headingMatch = HEADING_RE.exec(line);
+            if (headingMatch) {
+                flushParagraph();
+                blocks.push({ type: 'heading', level: Number(headingMatch[1]), text: headingMatch[2] });
+                i += 1;
+                continue;
+            }
+
+            // 5. Таблица (строка начинается с |). Обработчик появится в
+            // задаче 4 — пока это обычный текст абзаца.
+            if (line.startsWith('|')) {
+                paragraphLines.push(line);
+                i += 1;
+                continue;
+            }
+
+            // 6. Список (строка начинается с серии *, -, # и пробела).
+            // Обработчик появится в задаче 4 — пока это обычный текст абзаца.
+            if (LIST_MARKER_RE.test(line)) {
+                paragraphLines.push(line);
+                i += 1;
+                continue;
+            }
+
+            // 7. Пустая строка — завершает текущий абзац.
+            if (line.trim() === '') {
+                flushParagraph();
+                i += 1;
+                continue;
+            }
+
+            // 8. Прочее — накапливается в текущий абзац.
+            paragraphLines.push(line);
+            i += 1;
+        }
+
+        flushParagraph();
+        return blocks;
+    }
+
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { parseInline };
+        module.exports = { parseInline, parseBlocks };
     }
 })();

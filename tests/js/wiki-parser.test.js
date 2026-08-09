@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { parseInline } = require('../../web/static/wiki-parser.js');
+const { parseInline, parseBlocks } = require('../../web/static/wiki-parser.js');
 
 // Хелпер: собирает из узлов плоскую строку вида "text|strong(text)" для читаемых сравнений
 function shape(nodes) {
@@ -123,4 +123,73 @@ test('перенос строки', () => {
 
 test('неизвестный макрос отдаёт внутренний текст', () => {
     assert.strictEqual(shape(parseInline('{unknown}текст{unknown}')), 'текст');
+});
+
+test('абзацы разделяются пустой строкой', () => {
+    const blocks = parseBlocks('первый\n\nвторой');
+    assert.deepStrictEqual(blocks.map(b => b.type), ['paragraph', 'paragraph']);
+    assert.strictEqual(blocks[0].text, 'первый');
+    assert.strictEqual(blocks[1].text, 'второй');
+});
+
+test('соседние строки склеиваются в один абзац', () => {
+    const blocks = parseBlocks('первая\nвторая');
+    assert.strictEqual(blocks.length, 1);
+    assert.strictEqual(blocks[0].text, 'первая\nвторая');
+});
+
+test('заголовки h1..h6', () => {
+    const blocks = parseBlocks('h2. Заголовок');
+    assert.deepStrictEqual(blocks, [{ type: 'heading', level: 2, text: 'Заголовок' }]);
+});
+
+test('блок кода сохраняет содержимое дословно', () => {
+    const blocks = parseBlocks('{code}\nif (a*b) { return x_y_z; }\nhttps://example.com\n{code}');
+    assert.strictEqual(blocks.length, 1);
+    assert.strictEqual(blocks[0].type, 'code');
+    assert.strictEqual(blocks[0].text, 'if (a*b) { return x_y_z; }\nhttps://example.com');
+});
+
+test('блок кода с языком', () => {
+    const blocks = parseBlocks('{code:java}int x = 1;{code}');
+    assert.strictEqual(blocks[0].language, 'java');
+    assert.strictEqual(blocks[0].text, 'int x = 1;');
+});
+
+test('noformat даёт такой же блок кода', () => {
+    const blocks = parseBlocks('{noformat}a*b{noformat}');
+    assert.strictEqual(blocks[0].type, 'code');
+    assert.strictEqual(blocks[0].text, 'a*b');
+});
+
+test('незакрытый блок кода поглощает текст до конца', () => {
+    const blocks = parseBlocks('{code}\nхвост без закрытия');
+    assert.strictEqual(blocks[0].type, 'code');
+    assert.strictEqual(blocks[0].text, 'хвост без закрытия');
+});
+
+test('цитата содержит вложенные блоки', () => {
+    const blocks = parseBlocks('{quote}текст цитаты{quote}');
+    assert.strictEqual(blocks[0].type, 'quote');
+    assert.strictEqual(blocks[0].blocks[0].type, 'paragraph');
+    assert.strictEqual(blocks[0].blocks[0].text, 'текст цитаты');
+});
+
+test('панель с заголовком и без', () => {
+    const withTitle = parseBlocks('{panel:title=Важно}Текст{panel}')[0];
+    assert.strictEqual(withTitle.type, 'panel');
+    assert.strictEqual(withTitle.title, 'Важно');
+    assert.strictEqual(withTitle.blocks[0].text, 'Текст');
+
+    const noTitle = parseBlocks('{panel}Текст{panel}')[0];
+    assert.strictEqual(noTitle.title, null);
+});
+
+test('горизонтальная линия', () => {
+    assert.deepStrictEqual(parseBlocks('----'), [{ type: 'rule' }]);
+});
+
+test('пустой ввод даёт пустой список блоков', () => {
+    assert.deepStrictEqual(parseBlocks(''), []);
+    assert.deepStrictEqual(parseBlocks('   \n  \n'), []);
 });
