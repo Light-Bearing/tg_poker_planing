@@ -200,8 +200,18 @@ test('соседние строки склеиваются в один абза�
 });
 
 test('заголовки h1..h6', () => {
-    const blocks = parseBlocks('h2. Заголовок');
-    assert.deepStrictEqual(blocks, [{ type: 'heading', level: 2, text: 'Заголовок' }]);
+    for (let level = 1; level <= 6; level += 1) {
+        const blocks = parseBlocks('h' + level + '. Заголовок');
+        assert.deepStrictEqual(
+            blocks,
+            [{ type: 'heading', level: level, text: 'Заголовок' }],
+            'уровень h' + level
+        );
+        const html = parseJiraWiki('h' + level + '. Заголовок');
+        assert.match(html, new RegExp('<h' + level + '>Заголовок</h' + level + '>'));
+    }
+    // h7 уровнем не является и остаётся обычным абзацем.
+    assert.strictEqual(parseBlocks('h7. Не заголовок')[0].type, 'paragraph');
 });
 
 test('блок кода сохраняет содержимое дословно', () => {
@@ -393,6 +403,46 @@ test('опасные символы экранируются', () => {
     assert.match(html, /&lt;script&gt;/);
     assert.match(html, /&amp;/);
     assert.match(html, /&quot;кавычки&quot;/);
+});
+
+// Экранирование в атрибутах: значения атрибутов приходят из ввода, и
+// незакрытая кавычка в них ломала бы разметку целиком, а не только текст.
+
+test('кавычка в адресе ссылки экранируется и не рвёт атрибут', () => {
+    const html = parseJiraWiki('[текст|https://example.com/a"onmouseover=x]');
+    assert.match(html, /href="https:\/\/example\.com\/a&quot;onmouseover=x"/);
+    assert.ok(!/href="[^"]*"[^>]*onmouseover=/.test(html), 'кавычка не должна порождать новый атрибут');
+});
+
+test('угловая скобка в заголовке панели экранируется', () => {
+    const html = parseJiraWiki('{panel:title=A<script>B}Текст{panel}');
+    assert.match(html, /<div class="jira-panel-title">A&lt;script&gt;B<\/div>/);
+    assert.ok(!/<script>/.test(html));
+});
+
+test('кавычка в языке блока кода экранируется в data-language', () => {
+    const html = parseJiraWiki('{code:ja"va}x{code}');
+    assert.match(html, /<code data-language="ja&quot;va">/);
+});
+
+// Сборка HTML для узлов, которые до сих пор проверялись только как AST.
+
+test('верхний и нижний индекс отрисовываются', () => {
+    assert.match(parseJiraWiki('x^2^ и H~2~O'), /x<sup>2<\/sup> и H<sub>2<\/sub>O/);
+});
+
+test('перенос строки отрисовывается как br', () => {
+    assert.match(parseJiraWiki('раз\\\\два'), /<p>раз<br>два<\/p>/);
+});
+
+test('цвет отрисовывается как span со стилем', () => {
+    assert.match(parseJiraWiki('{color:red}важно{color}'), /<span style="color:red">важно<\/span>/);
+    // Непонятное значение цвета не попадает в стиль как есть.
+    assert.match(parseJiraWiki('{color:red;}x{color}'), /<span style="color:inherit">x<\/span>/);
+});
+
+test('ключ задачи отрисовывается как jira-task-ref', () => {
+    assert.match(parseJiraWiki('см. ABC-123 подробнее'), /<span class="jira-task-ref">ABC-123<\/span>/);
 });
 
 test('блок кода с языком отрисовывает data-language', () => {
