@@ -804,3 +804,45 @@ class TestWebSocketVoteValidation:
 
         stored_game = await state.storage.get_game("web", "test-session")
         assert stored_game.votes == {}
+
+
+class TestWebSocketFreshGame:
+    @pytest.mark.asyncio
+    async def test_vote_does_not_wipe_votes_cast_after_connect(self, ws):
+        """Алиса подключилась, Боб проголосовал «снаружи», Алиса голосует по WS.
+        Голос Боба должен уцелеть — значит обработчик читал игру заново."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+
+        messages = iter(
+            [
+                '{"type": "join", "username": "alice"}',
+                "__external_vote__",
+                '{"type": "vote", "username": "alice", "point": "3"}',
+            ]
+        )
+
+        async def receive_text():
+            try:
+                nxt = next(messages)
+            except StopIteration:
+                raise WebSocketDisconnect() from None
+            if nxt == "__external_vote__":
+                # Эмулируем голос Боба через REST: отдельное чтение и запись игры
+                fresh = await state.storage.get_game("web", "test-session")
+                fresh.add_vote({"id": "web_bob", "first_name": "bob", "username": "bob"}, "5")
+                await state.storage.save_game(fresh)
+                return "ping"
+            return nxt
+
+        ws.receive_text.side_effect = receive_text
+
+        await websocket_endpoint(ws)
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert "web_bob" in saved.votes, "голос Боба затёрт устаревшим объектом игры"
+        assert "web_alice" in saved.votes
+        assert saved.votes["web_bob"].point == "5"
