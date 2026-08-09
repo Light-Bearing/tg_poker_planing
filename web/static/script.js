@@ -135,6 +135,7 @@ let currentTaskText = '';     // текущий текст задачи (для 
 
 let _jiraMsgId = 0;
 const _jiraPending = new Map();
+const JIRA_EXT_TIMEOUT = 20000; // сколько ждём ответа расширения, мс
 
 function hasJiraExt() {
     return document.documentElement.dataset.ppJiraExt !== undefined;
@@ -160,10 +161,12 @@ window.addEventListener('message', (event) => {
     if (!event.data || event.data.source !== 'pp-jira-ext') return;
 
     const { msgId, response } = event.data;
-    const resolve = _jiraPending.get(msgId);
-    if (resolve) {
+    const pending = _jiraPending.get(msgId);
+    if (pending) {
         _jiraPending.delete(msgId);
-        resolve(response);
+        // Снимаем таймер: иначе он выстрелит позже уже по пустому месту
+        clearTimeout(pending.timer);
+        pending.resolve(response);
     }
 });
 
@@ -174,7 +177,16 @@ function jiraSendMessage(msg) {
             return;
         }
         const msgId = ++_jiraMsgId;
-        _jiraPending.set(msgId, resolve);
+        // Без таймаута промис не разрешится никогда, если расширение выгружено
+        // или сообщение потерялось: кнопка навсегда зависнет в «⏳ ОТПРАВКА...»
+        const timer = setTimeout(() => {
+            _jiraPending.delete(msgId);
+            resolve({
+                ok: false,
+                error: 'Расширение не ответило за 20 с. Проверьте, что оно включено, и перезагрузите страницу.',
+            });
+        }, JIRA_EXT_TIMEOUT);
+        _jiraPending.set(msgId, { resolve, timer });
         // postMessage использует structured clone — надёжно работает в Chrome и Firefox
         window.postMessage({
             source: 'pp-jira-page',
