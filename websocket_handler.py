@@ -114,6 +114,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     msg = json.loads(data)
                     msg_type = msg.get("type")
+                    # Читаем игру заново на каждое сообщение: за время жизни
+                    # соединения её могли изменить другие участники.
+                    game = await state.storage.get_game(WEB_CHAT_ID, session_id)
                     if msg_type == "join":
                         username = validate_username(msg.get("username", ""))
                         if not username:
