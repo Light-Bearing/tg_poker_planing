@@ -53,6 +53,11 @@
 
     const COLOR_RE = /^(inherit|initial|revert|unset|[a-z]+|#[\da-f]{3,8})$/i;
 
+    // Ключ задачи целиком, без остатка: [ABC-123] — это ссылка на задачу,
+    // а не адрес. Правило 3 иначе отдало бы её normalizeHref, и получился бы
+    // мёртвый href="https://ABC-123".
+    const ISSUE_KEY_ONLY_RE = /^[A-Z]{2,6}-\d+$/;
+
     // Символы, на которых обрывается голый URL (кроме пробельных).
     const BARE_URL_STOP = /[\s<>"’)\]]/;
 
@@ -119,6 +124,12 @@
                 if (end !== -1 && (lineBreak === -1 || end < lineBreak)) {
                     const inner = text.slice(i + 1, end);
                     const barPos = inner.indexOf('|');
+                    if (barPos === -1 && ISSUE_KEY_ONLY_RE.test(inner)) {
+                        flush();
+                        nodes.push({ type: 'issue', key: inner });
+                        i = end + 1;
+                        continue;
+                    }
                     let children, href;
                     if (barPos === -1) {
                         // Подписи нет — она совпадает с адресом, а адрес не
