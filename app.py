@@ -49,10 +49,14 @@ async def shutdown_app(app: Starlette) -> None:
 
 
 async def session_cleanup_loop(interval: float) -> None:
-    """Периодически убирает из памяти сессии без активных подключений."""
+    """Периодически убирает из памяти сессии без активных подключений
+    и протухшие записи rate-limiter'а."""
+    from web_api import evict_stale_rate_limits
+
     while True:
         await asyncio.sleep(interval)
         manager.cleanup_old_sessions()
+        evict_stale_rate_limits()
 
 
 async def build_app():

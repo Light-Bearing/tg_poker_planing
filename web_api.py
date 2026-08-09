@@ -24,14 +24,23 @@ def _check_rate_limit(key: str, max_requests: int = 30, window: float = 60.0) ->
     """Проверяет rate limit: не более max_requests запросов за window секунд.
     Возвращает True, если запрос разрешён."""
     now = time.time()
-    timestamps = _rate_limit_store.get(key, [])
-    # Удаляем устаревшие
-    timestamps = [t for t in timestamps if now - t < window]
+    timestamps = [t for t in _rate_limit_store.get(key, []) if now - t < window]
     if len(timestamps) >= max_requests:
+        _rate_limit_store[key] = timestamps
         return False
     timestamps.append(now)
     _rate_limit_store[key] = timestamps
     return True
+
+
+def evict_stale_rate_limits(window: float = 60.0) -> None:
+    """Убирает ключи, по которым за окно не было ни одного запроса.
+
+    Без этого словарь хранит по записи на каждый когда-либо виденный IP.
+    """
+    now = time.time()
+    for key in [k for k, ts in _rate_limit_store.items() if all(now - t >= window for t in ts)]:
+        del _rate_limit_store[key]
 
 
 # ========== USERNAME VALIDATION ==========
