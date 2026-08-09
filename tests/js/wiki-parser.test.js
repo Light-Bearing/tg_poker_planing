@@ -138,6 +138,20 @@ test('ключ задачи, слитый с кириллическим слов
     assert.strictEqual(shape(parseInline('см. ABC-123текст без пробела')), 'см. ABC-123текст без пробела');
 });
 
+test('ключ задачи в квадратных скобках остаётся ссылкой на задачу, а не мёртвым href', () => {
+    assert.strictEqual(shape(parseInline('[ABC-123]')), 'issue(ABC-123)');
+
+    const html = parseJiraWiki('[ABC-123]');
+    assert.match(html, /<span class="jira-task-ref">ABC-123<\/span>/);
+    assert.ok(!/<a /.test(html), 'ключ задачи не должен превращаться в ссылку на https://ABC-123');
+});
+
+test('ключ задачи с подписью остаётся обычной ссылкой', () => {
+    const nodes = parseInline('[ABC-123|https://jira.corp/browse/ABC-123]');
+    assert.strictEqual(nodes[0].type, 'link');
+    assert.strictEqual(nodes[0].href, 'https://jira.corp/browse/ABC-123');
+});
+
 test('ключ задачи в конце предложения перед точкой распознаётся', () => {
     assert.strictEqual(shape(parseInline('Готово: ABC-123.')), 'Готово: issue(ABC-123).');
 });
