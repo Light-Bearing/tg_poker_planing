@@ -10,8 +10,16 @@ document.documentElement.dataset.ppJiraExt = '1.0';
 // Сигналим странице через событие (на случай, если DOM уже готов)
 document.dispatchEvent(new CustomEvent('pp-jira-ready'));
 
-// Используем runtime API (работает в обоих браузерах)
-const runtime = typeof browser !== 'undefined' ? browser.runtime : chrome.runtime;
+// Отправка сообщения в background в форме, корректной для обоих API:
+// в Firefox browser.runtime.sendMessage возвращает промис и форма с колбэком
+// там не гарантирована, в Chrome же промис-форма есть не везде.
+// browser-polyfill.min.js в content script не подключён — поэтому разводим руками.
+function sendToBackground(msg) {
+    if (typeof browser !== 'undefined' && browser.runtime) {
+        return browser.runtime.sendMessage(msg);
+    }
+    return new Promise(resolve => chrome.runtime.sendMessage(msg, resolve));
+}
 
 // Слушаем сообщения от страницы через postMessage
 window.addEventListener('message', async (event) => {
@@ -25,9 +33,7 @@ window.addEventListener('message', async (event) => {
     if (!msgId) return;
 
     try {
-        const response = await new Promise(resolve => {
-            runtime.sendMessage(msg, resolve);
-        });
+        const response = await sendToBackground(msg);
         // Отвечаем странице через postMessage
         window.postMessage({
             source: 'pp-jira-ext',
