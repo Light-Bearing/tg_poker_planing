@@ -7,9 +7,11 @@ const api = typeof browser !== 'undefined' ? browser : (typeof chrome !== 'undef
 const runtime = api ? api.runtime : null;
 const storage = api ? api.storage : null;
 
-// Хелпер для заголовков запросов к Jira
+// Хелпер для заголовков запросов к Jira.
+// X-Atlassian-Token: no-check — стандартная практика для Jira Server: для REST-запросов
+// с токеном заголовок безвреден, а при включённой XSRF-защите снимает отказ на PUT/POST.
 function jiraAuth(token, extra = {}) {
-    return { ...extra, 'Authorization': `Bearer ${token}` };
+    return { ...extra, 'Authorization': `Bearer ${token}`, 'X-Atlassian-Token': 'no-check' };
 }
 
 // Разбирает тело ошибочного ответа Jira в читаемое сообщение.
@@ -89,8 +91,12 @@ function handleMessage(message, sender, sendResponse) {
     // Проверить подключение к Jira
     if (message.type === 'testConnection') {
         const { jiraUrl, jiraToken } = message;
+        // credentials: 'omit' — аутентифицируемся Bearer-токеном и на сессионные куки
+        // не полагаемся. Если браузер приложит куку сессии Jira, Jira Server может
+        // предпочесть сессию токену и включить XSRF-защиту на изменяющих запросах.
         fetch(`${jiraUrl}/rest/api/2/myself`, {
             headers: jiraAuth(jiraToken),
+            credentials: 'omit',
         })
             .then(r => {
                 if (r.ok) return r.json();
@@ -106,6 +112,7 @@ function handleMessage(message, sender, sendResponse) {
         const { jiraUrl, jiraToken } = message;
         fetch(`${jiraUrl}/rest/api/2/field`, {
             headers: jiraAuth(jiraToken),
+            credentials: 'omit',
         })
             .then(r => r.json())
             .then(data => sendResponse({ ok: true, fields: data }))
@@ -119,7 +126,7 @@ function handleMessage(message, sender, sendResponse) {
         const fieldsParam = fields.split(',').map(f => f.trim()).filter(Boolean).join(',');
         fetch(
             `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
-            { headers: jiraAuth(jiraToken) }
+            { headers: jiraAuth(jiraToken), credentials: 'omit' }
         )
             .then(r => r.json())
             .then(data => sendResponse({ ok: true, issues: data.issues || [] }))
@@ -134,6 +141,7 @@ function handleMessage(message, sender, sendResponse) {
             method: 'PUT',
             headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({ fields: { [fieldId]: value } }),
+            credentials: 'omit',
         })
             .then(r => {
                 if (r.ok || r.status === 204) return { ok: true };
@@ -151,6 +159,7 @@ function handleMessage(message, sender, sendResponse) {
             method: 'POST',
             headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
             body: JSON.stringify({ body: comment }),
+            credentials: 'omit',
         })
             .then(r => {
                 if (r.ok || r.status === 201) return { ok: true };
