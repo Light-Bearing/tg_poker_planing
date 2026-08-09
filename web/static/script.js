@@ -2627,7 +2627,8 @@ function renderParticipants(session) {
                 }
             }
             
-            voteDisplay = `<span class="vote-value revealed${extraClass}">${point}</span>`;
+            // extraClass — внутреннее значение, а point приходит из шкалы: экранируем
+            voteDisplay = `<span class="vote-value revealed${extraClass}">${escapeHtml(point)}</span>`;
         }
 
         const hasVoted = !!p.vote;
@@ -2679,7 +2680,7 @@ function renderHistogram(session) {
         const isSpecial = SPECIAL_POINTS.includes(point);
         return `
             <div class="histogram-row">
-                <span class="histogram-label ${isSpecial ? 'special' : ''}">${point}</span>
+                <span class="histogram-label ${isSpecial ? 'special' : ''}">${escapeHtml(point)}</span>
                 <div class="histogram-bar-track">
                     <div class="histogram-bar" style="width: ${pct}%"></div>
                 </div>

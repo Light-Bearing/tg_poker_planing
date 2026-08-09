@@ -59,6 +59,22 @@ def validate_username(raw: str) -> str | None:
     return name
 
 
+# ========== SCALE POINT VALIDATION ==========
+# Значение точки шкалы — короткая метка (1, 13, XS, ❔, ☕), и она попадает
+# в HTML на фронте. Разрешаем буквы любого алфавита, цифры и пунктуацию из
+# существующих шкал; < > " ' & ` и пустые значения отсекаются.
+SCALE_POINT_RE = re.compile(r"[\w.,:;!?+\-*/½∞❔☕ ]{1,8}", re.UNICODE)
+SCALE_POINT_ERROR = "Each point must be 1-8 characters: letters, digits, and . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+
+
+def validate_scale_point(raw: str) -> str | None:
+    """Нормализует значение точки шкалы. Возвращает None, если оно недопустимо."""
+    point = (raw or "").strip()
+    if not point or not SCALE_POINT_RE.fullmatch(point):
+        return None
+    return point
+
+
 def game_to_web_response(game: Game, session_id: str) -> dict:
     votes = []
     for user_id, vote in game.votes.items():
@@ -417,15 +433,25 @@ async def api_save_custom_scale(request: Request):
             return JSONResponse({"error": "username is required"}, status_code=400)
         if not isinstance(points, list) or not all(isinstance(p, str) for p in points):
             return JSONResponse({"error": "points must be a list of strings"}, status_code=400)
-        if len(points) < 8:
+
+        # Точка шкалы становится допустимым голосом и рендерится в HTML у всех
+        # участников, поэтому содержимое ограничиваем белым списком.
+        cleaned = []
+        for raw_point in points:
+            point = validate_scale_point(raw_point)
+            if point is None:
+                return JSONResponse({"error": SCALE_POINT_ERROR}, status_code=400)
+            cleaned.append(point)
+
+        if len(cleaned) < 8:
             return JSONResponse(
                 {"error": "At least 8 points are required (standard scales have 8-12 points)"}, status_code=400
             )
-        if len(points) != len(set(points)):
+        if len(cleaned) != len(set(cleaned)):
             return JSONResponse({"error": "Duplicate points are not allowed"}, status_code=400)
 
-        await state.storage.save_custom_scale(f"web_{username}", points)
-        return JSONResponse({"ok": True, "points": points})
+        await state.storage.save_custom_scale(f"web_{username}", cleaned)
+        return JSONResponse({"ok": True, "points": cleaned})
     except Exception as e:
         logger.error(f"Error saving custom scale: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
