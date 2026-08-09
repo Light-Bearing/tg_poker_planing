@@ -26,3 +26,14 @@ repos:
         language: script
         types: [python]
         pass_filenames: false
+
+      # language: system, а не script: script ищет entry относительно корня
+      # репозитория (для .venv/bin/python выше это верно), а node живёт в PATH.
+      # Кавычки вокруг шаблона обязательны — аргумент-каталог node не понимает;
+      # pre-commit запускает команду без шелла, поэтому шаблон достаётся node.
+      - id: node-test
+        name: node --test
+        entry: node --test 'tests/js/*.test.js'
+        language: system
+        types: [javascript]
+        pass_filenames: false
