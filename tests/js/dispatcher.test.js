@@ -43,3 +43,18 @@ test('ADF: ссылка и код сохраняют адрес и текст', 
     assert.match(html, /href="https:\/\/wiki\.corp\/api_v2_spec"/);
     assert.match(html, /<code>user_name_id<\/code>/);
 });
+
+const { parseJiraWiki } = require('../../web/static/wiki-parser.js');
+
+test('диспетчер: строка идёт в wiki-ветку', () => {
+    assert.strictEqual(parseJiraDescription('*жирный*'), parseJiraWiki('*жирный*'));
+});
+
+test('диспетчер: не строка и не ADF приводится к экранированной строке', () => {
+    assert.strictEqual(parseJiraDescription(42), '42');
+});
+
+test('диспетчер: wiki-ветка больше не искажает адреса', () => {
+    const html = parseJiraDescription('[Дока|https://wiki.corp/api_v2_spec]');
+    assert.match(html, /href="https:\/\/wiki\.corp\/api_v2_spec"/);
+});
