@@ -202,6 +202,59 @@ function jiraAuth(token, extra = {}) {
     return { ...extra, 'Authorization': `Bearer ${token}` };
 }
 
+// Короткая расшифровка результата пробы — чтобы владелец понял вывод без нас
+function explainProbe(result) {
+  if (result.status === 0) return 'нет ответа: сеть, прокси или CORS';
+  if (result.status === 401) return 'токен не принят';
+  if (result.status === 403) return 'запрет: XSRF, права или фильтр перед Jira';
+  if (result.status === 404 && result.method !== 'GET') return 'запрос дошёл до Jira: задачи нет — это ожидаемо и хорошо';
+  if (result.status === 404) return 'адрес не найден: проверьте URL Jira';
+  if (result.ok) return 'успех';
+  return 'см. тело ответа';
+}
+
+// Диагностика: четыре пробы через background, результат текстом в <pre>
+async function runDiagnose() {
+  const jiraUrl = document.getElementById('jiraUrl').value.trim().replace(/\/+$/, '');
+  const jiraToken = document.getElementById('jiraToken').value.trim();
+
+  if (!jiraUrl || !jiraToken) {
+    showStatus('connectionStatus', 'Укажите URL Jira и API Token', 'error');
+    return;
+  }
+
+  const outEl = document.getElementById('diagnoseOutput');
+  outEl.classList.remove('hidden');
+  outEl.textContent = 'Выполняются четыре пробы...';
+
+  let resp;
+  try {
+    resp = await browser.runtime.sendMessage({ type: 'diagnose', jiraUrl, jiraToken });
+  } catch (err) {
+    outEl.textContent = `Расширение не ответило: ${err.message}`;
+    return;
+  }
+
+  if (!resp || !resp.ok) {
+    outEl.textContent = `Диагностика не выполнена: ${(resp && resp.error) || 'нет ответа'}`;
+    return;
+  }
+
+  const lines = [`Jira: ${jiraUrl}`, ''];
+  resp.results.forEach((r) => {
+    const path = r.url.startsWith(jiraUrl) ? r.url.slice(jiraUrl.length) : r.url;
+    const code = r.status === 0 ? 'нет ответа' : `HTTP ${r.status}`;
+    lines.push(`${r.step}. ${r.method} ${path}`);
+    lines.push(`   ${code} — ${explainProbe(r)}`);
+    lines.push(`   ${r.body || '(пустое тело)'}`);
+    lines.push('');
+  });
+  lines.push('Пробы 3 и 4 идут на несуществующую задачу ZZZZ-99999 и ничего не меняют.');
+  lines.push('404 на них — хорошо: запись доходит до Jira. 403 или HTML — режут по пути.');
+
+  outEl.textContent = lines.join('\n');
+}
+
 // Показать статус
 function showStatus(elementId, message, type) {
   const el = document.getElementById(elementId);
@@ -223,5 +276,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('saveSettings').addEventListener('click', saveSettings);
   document.getElementById('clearSettings').addEventListener('click', clearSettings);
   document.getElementById('testConnection').addEventListener('click', testConnection);
+  document.getElementById('runDiagnose').addEventListener('click', runDiagnose);
   document.getElementById('loadFields').addEventListener('click', loadFields);
 });

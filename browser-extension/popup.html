@@ -111,6 +111,22 @@
     .hidden {
       display: none;
     }
+    /* Вывод диагностики: текст должен выделяться и копироваться целиком */
+    .diagnose-output {
+      margin-top: 8px;
+      padding: 8px;
+      background: #f4f5f7;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.4;
+      max-height: 260px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      user-select: text;
+    }
   </style>
 </head>
 <body>
@@ -136,7 +152,10 @@
     <input type="text" id="jiraFilter" placeholder="project = MYPROJ AND status = 'In Progress'">
     
     <button id="testConnection" class="btn-secondary">Проверить подключение</button>
+    <button id="runDiagnose" class="btn-secondary">Диагностика</button>
+    <div class="help-text">Четыре пробы: чтение и запись. Ничего не меняет в Jira.</div>
     <div id="connectionStatus" class="status hidden"></div>
+    <pre id="diagnoseOutput" class="diagnose-output hidden"></pre>
   </div>
 
   <!-- Раздел полей -->

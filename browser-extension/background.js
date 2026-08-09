@@ -58,6 +58,57 @@ function jiraErrorFromResponse(r) {
     );
 }
 
+// Четыре пробы диагностики. Пробы 3 и 4 идут на заведомо несуществующую задачу:
+// ключ выбран так, чтобы такой задачи не было, изменить ничего нельзя.
+// Смысл: если PUT доходит до Jira, она ответит 404 (задача не найдена) — значит метод
+// и авторизация в порядке, а причина в правах или в поле. Если вернётся 403 или
+// HTML-страница — запрос режет nginx/WAF или срабатывает XSRF, до Jira он не доходит.
+// Отдельная проба POST нужна, чтобы отличить «режут PUT» от «режут любой изменяющий метод».
+const DIAGNOSE_PROBES = [
+    { step: 1, method: 'GET', path: '/rest/api/2/myself', payload: null },
+    { step: 2, method: 'GET', path: '/rest/api/2/field', payload: null },
+    { step: 3, method: 'PUT', path: '/rest/api/2/issue/ZZZZ-99999', payload: { fields: {} } },
+    { step: 4, method: 'POST', path: '/rest/api/2/issue/ZZZZ-99999/comment', payload: { body: 'ping' } },
+];
+
+// Страховка: токен не должен попасть в диагностический вывод ни при каких обстоятельствах
+function stripToken(text, token) {
+    if (!token || token.length < 8) return text;
+    return String(text).split(token).join('***');
+}
+
+// Выполняет все четыре пробы подряд. Пробы 3 и 4 выполняются всегда, даже если 1 и 2
+// упали, — важно именно сравнение кодов ответа между GET и изменяющими методами.
+async function runDiagnostics(jiraUrl, jiraToken) {
+    const results = [];
+    for (const probe of DIAGNOSE_PROBES) {
+        const url = `${jiraUrl}${probe.path}`;
+        const result = { step: probe.step, method: probe.method, url, status: 0, ok: false, body: '' };
+        try {
+            const init = {
+                method: probe.method,
+                headers: probe.payload
+                    ? jiraAuth(jiraToken, { 'Content-Type': 'application/json' })
+                    : jiraAuth(jiraToken),
+                credentials: 'omit',
+            };
+            if (probe.payload) init.body = JSON.stringify(probe.payload);
+
+            const r = await fetch(url, init);
+            const text = await r.text().catch(() => '');
+            result.status = r.status;
+            result.ok = r.ok;
+            result.body = text.replace(/\s+/g, ' ').trim().slice(0, 200);
+        } catch (err) {
+            // Сети нет, CORS, обрыв — код ответа остаётся 0, это тоже результат
+            result.body = friendlyError(err).slice(0, 200);
+        }
+        result.body = stripToken(result.body, jiraToken);
+        results.push(result);
+    }
+    return results;
+}
+
 // Преобразует Firefox TypeError (не-ASCII в заголовках) в понятное сообщение
 function friendlyError(err) {
     const msg = typeof err === 'string' ? err : String(err);
@@ -130,6 +181,15 @@ function handleMessage(message, sender, sendResponse) {
         )
             .then(r => r.json())
             .then(data => sendResponse({ ok: true, issues: data.issues || [] }))
+            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
+        return true;
+    }
+
+    // Диагностика: четыре пробы, чтобы понять, где именно рвётся отправка оценки
+    if (message.type === 'diagnose') {
+        const { jiraUrl, jiraToken } = message;
+        runDiagnostics(jiraUrl, jiraToken)
+            .then(results => sendResponse({ ok: true, results }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
         return true;
     }
