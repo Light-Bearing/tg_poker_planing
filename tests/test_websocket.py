@@ -898,6 +898,31 @@ class TestWebSocketSetScale:
         assert manager.session_users["test-session"]["alice"]["status"] == "pending"
 
     @pytest.mark.asyncio
+    async def test_set_scale_unknown_name_returns_error_and_keeps_votes(self, ws):
+        """Неизвестная шкала: клиент получает ошибку, голоса и шкала не трогаются."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "bogus", "username": "alice"}',
+            WebSocketDisconnect(),
+        ]
+        ws.send_json.reset_mock()
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert errors, "на неизвестную шкалу должна прийти ошибка"
+        assert errors[0].args[0]["message"] == "Неизвестная шкала оценок"
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "custom"
+        assert "web_alice" in saved.votes, "голоса не должны сбрасываться при опечатке"
+
+    @pytest.mark.asyncio
     async def test_set_scale_by_non_initiator_returns_error(self, ws):
         game = state.storage.new_game(
             "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"

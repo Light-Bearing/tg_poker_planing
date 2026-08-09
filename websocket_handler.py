@@ -153,12 +153,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     elif msg_type == "set_scale":
                         scale_name = msg.get("scale_name", "")
                         setter_username = msg.get("username", "")
-                        if game and scale_name in SCALES:
+                        if game:
                             # Только инициатор может менять шкалу
                             if f"web_{setter_username}" != game.initiator.id:
                                 logger.warning(f"User {setter_username} is not initiator, cannot change scale")
                                 await websocket.send_json(
                                     {"type": "error", "message": "Только инициатор может менять шкалу"}
+                                )
+                            elif scale_name not in SCALES:
+                                # Молча игнорировать нельзя: клиент решит, что шкала сменилась
+                                logger.warning(f"Unknown scale_name {scale_name!r} from {setter_username}")
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Неизвестная шкала оценок"}
                                 )
                             else:
                                 game.scale_name = scale_name
