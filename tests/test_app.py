@@ -45,6 +45,25 @@ class TestBuildApp:
             assert "/healthcheck" in routes
 
     @pytest.mark.asyncio
+    async def test_build_app_exposes_custom_scale_under_api_prefix(self):
+        """The frontend calls /api/custom-scale (web/static/script.js); the real
+        app must register the custom-scale routes under that path, not the bare
+        /custom-scale path, or saving a custom scale 404s in production."""
+        with (
+            patch("app.init_bot", new=AsyncMock()),
+            patch("app.GameRegistry"),
+            patch("app.Jinja2Templates"),
+            patch("os.path.exists", return_value=False),
+        ):
+            from app import build_app
+
+            app = await build_app()
+            custom_scale_routes = [r for r in app.routes if getattr(r, "path", None) == "/api/custom-scale"]
+            methods_seen = {m for r in custom_scale_routes for m in (r.methods or set())}
+            assert "GET" in methods_seen, "GET /api/custom-scale must be registered for reading a saved scale"
+            assert "POST" in methods_seen, "POST /api/custom-scale must be registered for saving a custom scale"
+
+    @pytest.mark.asyncio
     async def test_build_app_calls_init_bot(self):
         init_bot_mock = AsyncMock()
         with (
