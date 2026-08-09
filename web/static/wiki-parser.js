@@ -44,6 +44,22 @@
         return 'https://' + href;
     }
 
+    // Общий шаблон для правил 5 и 6: за открывающим `{...:` или `{` следует
+    // заголовок до ближайшей `}`, а затем где-то дальше — парный закрывающий
+    // тег. closeTagOf получает текст заголовка и решает, как выглядит парный
+    // тег (для {color} он фиксирован, для произвольного {макрос} — зависит от
+    // имени); вернув null, отказывается признавать конструкцию макросом.
+    function findMacroSpan(text, headerStart, closeTagOf) {
+        const headerEnd = text.indexOf('}', headerStart);
+        if (headerEnd === -1) return null;
+        const header = text.slice(headerStart, headerEnd);
+        const closeTag = closeTagOf(header);
+        if (closeTag === null) return null;
+        const closeStart = text.indexOf(closeTag, headerEnd + 1);
+        if (closeStart === -1) return null;
+        return { headerEnd: headerEnd, closeStart: closeStart, header: header, closeTag: closeTag };
+    }
+
     function parseInline(text) {
         const nodes = [];
         let buf = '';
@@ -78,10 +94,12 @@
                 continue;
             }
 
-            // 3. [ссылка]
+            // 3. [ссылка] — закрывающая ] ищется только в пределах текущей
+            // строки: незакрытая [ не должна поглощать текст за переводом строки.
             if (ch === '[') {
                 const end = text.indexOf(']', i + 1);
-                if (end !== -1) {
+                const lineBreak = text.indexOf('\n', i + 1);
+                if (end !== -1 && (lineBreak === -1 || end < lineBreak)) {
                     const inner = text.slice(i + 1, end);
                     const barPos = inner.indexOf('|');
                     let children, href;
@@ -130,42 +148,34 @@
 
             // 5. {color:...}...{color}
             if (text.startsWith('{color:', i)) {
-                const headerEnd = text.indexOf('}', i + 7);
-                if (headerEnd !== -1) {
-                    let color = text.slice(i + 7, headerEnd);
+                const span = findMacroSpan(text, i + 7, function () { return '{color}'; });
+                if (span) {
+                    let color = span.header;
                     if (!COLOR_RE.test(color)) color = 'inherit';
-                    const closeStart = text.indexOf('{color}', headerEnd + 1);
-                    if (closeStart !== -1) {
-                        const inner = text.slice(headerEnd + 1, closeStart);
-                        flush();
-                        nodes.push({
-                            type: 'color',
-                            color: color,
-                            children: parseInline(inner),
-                        });
-                        i = closeStart + 7;
-                        continue;
-                    }
+                    const inner = text.slice(span.headerEnd + 1, span.closeStart);
+                    flush();
+                    nodes.push({
+                        type: 'color',
+                        color: color,
+                        children: parseInline(inner),
+                    });
+                    i = span.closeStart + span.closeTag.length;
+                    continue;
                 }
             }
 
             // 6. Прочий {макрос}...{макрос}
             if (ch === '{') {
-                const headerEnd = text.indexOf('}', i + 1);
-                if (headerEnd !== -1) {
-                    const macro = text.slice(i + 1, headerEnd);
-                    // Имя макроса не должно содержать { или } — иначе это не макрос.
-                    if (macro && macro.indexOf('{') === -1) {
-                        const closeTag = '{' + macro + '}';
-                        const closeStart = text.indexOf(closeTag, headerEnd + 1);
-                        if (closeStart !== -1) {
-                            const inner = text.slice(headerEnd + 1, closeStart);
-                            flush();
-                            nodes.push.apply(nodes, parseInline(inner));
-                            i = closeStart + closeTag.length;
-                            continue;
-                        }
-                    }
+                const span = findMacroSpan(text, i + 1, function (macro) {
+                    // Имя макроса не должно содержать { — иначе это не макрос.
+                    return (macro && macro.indexOf('{') === -1) ? ('{' + macro + '}') : null;
+                });
+                if (span) {
+                    const inner = text.slice(span.headerEnd + 1, span.closeStart);
+                    flush();
+                    nodes.push.apply(nodes, parseInline(inner));
+                    i = span.closeStart + span.closeTag.length;
+                    continue;
                 }
             }
 
@@ -198,9 +208,13 @@
             }
 
             // 8. Ключ задачи ABC-123
+            // \b — ASCII-граница слова, кириллица в \w не входит, поэтому
+            // "ABC-123текст" с ней считался бы границей и склеивался с ключом.
+            // Отрицательный просмотр вперёд по Unicode-категориям буквы/цифры
+            // работает корректно и для кириллицы, и для любых других алфавитов.
             if (canOpenAt(text, i)) {
                 const rest = text.slice(i);
-                const m = /^[A-Z]{2,6}-\d+\b/.exec(rest);
+                const m = /^[A-Z]{2,6}-\d+(?![\p{L}\p{N}])/u.exec(rest);
                 if (m) {
                     flush();
                     nodes.push({ type: 'issue', key: m[0] });

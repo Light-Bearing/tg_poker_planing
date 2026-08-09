@@ -92,14 +92,29 @@ test('тильда внутри голого URL не превращается �
     assert.ok(!nodes.some(n => n.type === 'sub'), 'внутри адреса не должно быть разметки');
 });
 
+test('незакрытая скобка ссылки не пересекает границу строки', () => {
+    const input = '[oops this is unclosed and runs on\nfor a while until it finds a ] somewhere later';
+    const nodes = parseInline(input);
+    assert.ok(!nodes.some(n => n.type === 'link'), 'ссылка не должна собираться из текста за пределами первой строки');
+    assert.strictEqual(shape(nodes), input);
+});
+
 // --- прочее ---
 
 test('ключ задачи распознаётся', () => {
     assert.strictEqual(shape(parseInline('см. ABC-123 подробнее')), 'см. issue(ABC-123) подробнее');
 });
 
+test('ключ задачи, слитый с кириллическим словом, ключом не считается', () => {
+    assert.strictEqual(shape(parseInline('см. ABC-123текст без пробела')), 'см. ABC-123текст без пробела');
+});
+
+test('ключ задачи в конце предложения перед точкой распознаётся', () => {
+    assert.strictEqual(shape(parseInline('Готово: ABC-123.')), 'Готово: issue(ABC-123).');
+});
+
 test('цвет разбирается и содержит вложенную разметку', () => {
-    assert.strictEqual(shape(parseInline('{color:red}важно{color}')), 'color:red(важно)');
+    assert.strictEqual(shape(parseInline('{color:red}это *важно*{color}')), 'color:red(это strong(важно))');
 });
 
 test('перенос строки', () => {
