@@ -242,7 +242,7 @@
     const PANEL_OPEN_RE = /^\{panel(?::([^}]*))?\}/;
     const RULE_RE = /^-{4,}$/;
     const HEADING_RE = /^h([1-6])\.\s(.*)$/;
-    const LIST_MARKER_RE = /^[*\-#]+\s/;
+    const LIST_ITEM_RE = /^(\s*)([*\-#]+)\s+(.*)$/;
 
     // Собирает содержимое парной конструкции ({code}...{code}, {quote}...{quote}
     // и т.п.), открытой в lines[i] маркером длиной openLen, до строки с
@@ -287,6 +287,62 @@
         const result = lines.slice();
         while (result.length && result[0].trim() === '') result.shift();
         while (result.length && result[result.length - 1].trim() === '') result.pop();
+        return result;
+    }
+
+    // Разбирает одну строку таблицы. Если строка начинается с `||` — это
+    // заголовочная строка, ячейки разделены `||`; иначе обычная строка,
+    // ячейки разделены одиночным `|`. Обрамляющие разделители (по одному
+    // с каждого края, если они есть) отбрасываются, каждая ячейка
+    // обрезается по краям.
+    function parseTableRow(line) {
+        const header = line.startsWith('||');
+        const sep = header ? '||' : '|';
+        let content = line;
+        if (content.startsWith(sep)) content = content.slice(sep.length);
+        if (content.endsWith(sep)) content = content.slice(0, -sep.length);
+        const cells = content.split(sep).map(function (cell) { return cell.trim(); });
+        return { header: header, cells: cells };
+    }
+
+    // Строит одно поддерево списка из плоского массива пунктов, начиная с
+    // pos.i. Глубина поддерева фиксируется первым пунктом на входе; все
+    // однопригодные (равной глубины) пункты подряд становятся элементами
+    // items, а любой более глубокий пункт сразу после — детьми последнего
+    // добавленного пункта (рекурсивный вызов).
+    //
+    // Перепрыгивание уровней вниз (глубина внезапно меньше текущей, без
+    // промежуточных значений) просто завершает текущее поддерево — цикл
+    // buildAllLists подхватит оставшиеся пункты и начнёт для них новый
+    // соседний список верхнего уровня. Перепрыгивание вверх (глубина сразу
+    // на несколько больше единицы) трактуется как один уровень вложенности:
+    // рекурсивный вызов берёт свою глубину из первого встреченного пункта,
+    // поэтому промежуточные уровни просто не создаются. Ни один из этих
+    // случаев не зацикливает разбор — pos.i продвигается на каждой итерации.
+    function buildList(flatItems, pos) {
+        const depth = flatItems[pos.i].depth;
+        const ordered = flatItems[pos.i].ordered;
+        const items = [];
+        while (pos.i < flatItems.length && flatItems[pos.i].depth === depth) {
+            const text = flatItems[pos.i].text;
+            pos.i += 1;
+            let children = null;
+            if (pos.i < flatItems.length && flatItems[pos.i].depth > depth) {
+                children = buildList(flatItems, pos);
+            }
+            items.push({ text: text, children: children });
+        }
+        return { type: 'list', ordered: ordered, items: items };
+    }
+
+    // Один прогон строк списка может содержать несколько соседних деревьев
+    // (см. перепрыгивание вниз в buildList) — собираем их все.
+    function buildAllLists(flatItems) {
+        const result = [];
+        const pos = { i: 0 };
+        while (pos.i < flatItems.length) {
+            result.push(buildList(flatItems, pos));
+        }
         return result;
     }
 
@@ -369,19 +425,29 @@
                 continue;
             }
 
-            // 5. Таблица (строка начинается с |). Обработчик появится в
-            // задаче 4 — пока это обычный текст абзаца.
+            // 5. Таблица — подряд идущие строки, начинающиеся с |.
             if (line.startsWith('|')) {
-                paragraphLines.push(line);
-                i += 1;
+                flushParagraph();
+                const rows = [];
+                while (i < lines.length && lines[i].startsWith('|')) {
+                    rows.push(parseTableRow(lines[i]));
+                    i += 1;
+                }
+                blocks.push({ type: 'table', rows: rows });
                 continue;
             }
 
-            // 6. Список (строка начинается с серии *, -, # и пробела).
-            // Обработчик появится в задаче 4 — пока это обычный текст абзаца.
-            if (LIST_MARKER_RE.test(line)) {
-                paragraphLines.push(line);
-                i += 1;
+            // 6. Список — подряд идущие строки вида (пробелы)(*|-|#)+(пробел)(текст).
+            if (LIST_ITEM_RE.test(line)) {
+                flushParagraph();
+                const flatItems = [];
+                while (i < lines.length) {
+                    const m = LIST_ITEM_RE.exec(lines[i]);
+                    if (!m) break;
+                    flatItems.push({ depth: m[2].length, ordered: m[2][0] === '#', text: m[3] });
+                    i += 1;
+                }
+                blocks.push.apply(blocks, buildAllLists(flatItems));
                 continue;
             }
 
@@ -401,7 +467,121 @@
         return blocks;
     }
 
+    // --- Сборка HTML --------------------------------------------------
+    // HTML и экранирование появляются только здесь. Эта функция намеренно
+    // дублирует одноимённую из adf-parser.js — оба файла обычные <script>
+    // без сборщика, и вынос шести строк в третий файл добавил бы зависимость
+    // по порядку загрузки ради их экономии.
+    function escapeHtml(text) {
+        return String(text == null ? '' : text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function renderInline(nodes) {
+        return nodes.map(renderInlineNode).join('');
+    }
+
+    function renderInlineNode(node) {
+        switch (node.type) {
+            case 'text':
+                return escapeHtml(node.text);
+            case 'strong':
+                return '<strong>' + renderInline(node.children) + '</strong>';
+            case 'em':
+                return '<em>' + renderInline(node.children) + '</em>';
+            case 'strike':
+                return '<s>' + renderInline(node.children) + '</s>';
+            case 'underline':
+                return '<u>' + renderInline(node.children) + '</u>';
+            case 'sup':
+                return '<sup>' + renderInline(node.children) + '</sup>';
+            case 'sub':
+                return '<sub>' + renderInline(node.children) + '</sub>';
+            case 'code':
+                return '<code>' + escapeHtml(node.text) + '</code>';
+            case 'link':
+                return '<a href="' + escapeHtml(node.href) + '" target="_blank" class="jira-desc-link">' +
+                    renderInline(node.children) + '</a>';
+            case 'color':
+                return '<span style="color:' + escapeHtml(node.color) + '">' + renderInline(node.children) + '</span>';
+            case 'issue':
+                return '<span class="jira-task-ref">' + escapeHtml(node.key) + '</span>';
+            case 'break':
+                return '<br>';
+            default:
+                return '';
+        }
+    }
+
+    function renderList(block) {
+        const tag = block.ordered ? 'ol' : 'ul';
+        const itemsHtml = block.items.map(function (item) {
+            const childrenHtml = item.children ? renderBlocks([item.children]) : '';
+            return '<li>' + renderInline(parseInline(item.text)) + childrenHtml + '</li>';
+        }).join('');
+        return '<' + tag + '>' + itemsHtml + '</' + tag + '>';
+    }
+
+    function renderTable(block) {
+        const rowsHtml = block.rows.map(function (row) {
+            const cellTag = row.header ? 'th' : 'td';
+            const cellsHtml = row.cells.map(function (cell) {
+                return '<' + cellTag + '>' + renderInline(parseInline(cell)) + '</' + cellTag + '>';
+            }).join('');
+            return '<tr>' + cellsHtml + '</tr>';
+        }).join('');
+        return '<table class="jira-table"><tbody>' + rowsHtml + '</tbody></table>';
+    }
+
+    function renderBlocks(blocks) {
+        return blocks.map(renderBlock).join('');
+    }
+
+    function renderBlock(block) {
+        switch (block.type) {
+            case 'paragraph':
+                return '<p>' + renderInline(parseInline(block.text)) + '</p>';
+            case 'heading':
+                return '<h' + block.level + '>' + renderInline(parseInline(block.text)) + '</h' + block.level + '>';
+            case 'code': {
+                const lang = block.language ? ' data-language="' + escapeHtml(block.language) + '"' : '';
+                return '<pre class="jira-code"><code' + lang + '>' + escapeHtml(block.text) + '</code></pre>';
+            }
+            case 'quote':
+                return '<blockquote>' + renderBlocks(block.blocks) + '</blockquote>';
+            case 'panel': {
+                const titleHtml = block.title
+                    ? '<div class="jira-panel-title">' + escapeHtml(block.title) + '</div>'
+                    : '';
+                return '<div class="jira-panel jira-panel-info">' + titleHtml +
+                    '<div class="jira-panel-content">' + renderBlocks(block.blocks) + '</div></div>';
+            }
+            case 'rule':
+                return '<hr>';
+            case 'list':
+                return renderList(block);
+            case 'table':
+                return renderTable(block);
+            default:
+                return '';
+        }
+    }
+
+    function parseJiraWiki(text) {
+        if (!text) return '';
+        const blocks = parseBlocks(String(text));
+        if (blocks.length === 0) return '';
+        return '<div class="jira-doc">' + renderBlocks(blocks) + '</div>';
+    }
+
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { parseInline, parseBlocks };
+        module.exports = { parseInline, parseBlocks, parseJiraWiki };
+    }
+    if (typeof window !== 'undefined') {
+        window.parseJiraWiki = parseJiraWiki;
     }
 })();

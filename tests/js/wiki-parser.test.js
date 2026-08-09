@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 
-const { parseInline, parseBlocks } = require('../../web/static/wiki-parser.js');
+const { parseInline, parseBlocks, parseJiraWiki } = require('../../web/static/wiki-parser.js');
 
 // Хелпер: собирает из узлов плоскую строку вида "text|strong(text)" для читаемых сравнений
 function shape(nodes) {
@@ -192,4 +192,109 @@ test('горизонтальная линия', () => {
 test('пустой ввод даёт пустой список блоков', () => {
     assert.deepStrictEqual(parseBlocks(''), []);
     assert.deepStrictEqual(parseBlocks('   \n  \n'), []);
+});
+
+// --- списки ---
+
+test('маркированный список без br между пунктами', () => {
+    const html = parseJiraWiki('* первый\n* второй');
+    assert.match(html, /<ul><li>первый<\/li><li>второй<\/li><\/ul>/);
+    assert.ok(!/<ul>[\s\S]*<br>[\s\S]*<\/ul>/.test(html), 'внутри списка не должно быть <br>');
+});
+
+test('нумерованный список даёт корректно вложенные теги', () => {
+    const html = parseJiraWiki('# раз\n# два');
+    assert.match(html, /<ol><li>раз<\/li><li>два<\/li><\/ol>/);
+});
+
+test('вложенный список', () => {
+    const html = parseJiraWiki('* внешний\n** внутренний');
+    assert.match(html, /<ul><li>внешний<ul><li>внутренний<\/li><\/ul><\/li><\/ul>/);
+});
+
+test('дефис тоже маркер списка', () => {
+    assert.match(parseJiraWiki('- пункт'), /<ul><li>пункт<\/li><\/ul>/);
+});
+
+// --- таблицы ---
+
+test('таблица: заголовок в th, строки данных отрисованы', () => {
+    const html = parseJiraWiki('||Имя||Тип||\n|user_id|int|\n|name|string|');
+    assert.match(html, /<th>Имя<\/th><th>Тип<\/th>/);
+    assert.match(html, /<td>user_id<\/td><td>int<\/td>/);
+    assert.match(html, /<td>name<\/td><td>string<\/td>/);
+    assert.ok(!/<tbody>[\s\S]*<br>[\s\S]*<\/tbody>/.test(html), 'внутри таблицы не должно быть <br>');
+});
+
+test('таблица без заголовочной строки', () => {
+    const html = parseJiraWiki('|a|b|');
+    assert.match(html, /<td>a<\/td><td>b<\/td>/);
+    assert.ok(!/<th>/.test(html));
+});
+
+// --- регрессии на найденные поломки ---
+
+test('регрессия: идентификатор с подчёркиваниями цел', () => {
+    const html = parseJiraWiki('Поле user_name_id пустое');
+    assert.match(html, /user_name_id/);
+    assert.ok(!/<em>/.test(html));
+});
+
+test('регрессия: адрес ссылки не искажается', () => {
+    const html = parseJiraWiki('[Дока|https://wiki.corp/api_v2_spec]');
+    assert.match(html, /href="https:\/\/wiki\.corp\/api_v2_spec"/);
+    assert.ok(!/&lt;em&gt;/.test(html));
+});
+
+test('регрессия: C++ и Java+Kotlin целы', () => {
+    const html = parseJiraWiki('Нужно C++ и Java+Kotlin');
+    assert.match(html, /C\+\+/);
+    assert.ok(!/<u>/.test(html));
+});
+
+test('регрессия: классы панели не повреждены', () => {
+    const html = parseJiraWiki('{panel:title=Важно}Текст панели{panel}');
+    assert.match(html, /class="jira-panel jira-panel-info"/);
+    assert.match(html, /class="jira-panel-title"/);
+    assert.ok(!/<s>/.test(html), 'дефисы в именах классов не должны стать зачёркиванием');
+});
+
+test('регрессия: содержимое блока кода дословно', () => {
+    const html = parseJiraWiki('{code}\nif (a*b) { return x_y_z; }\nhttps://example.com\n{code}');
+    assert.match(html, /<pre class="jira-code"><code>/);
+    assert.ok(!/<a /.test(html), 'URL внутри кода не должен стать ссылкой');
+    assert.ok(!/<br>/.test(html), 'переводы строк внутри кода не должны стать <br>');
+    assert.match(html, /x_y_z/);
+});
+
+// --- вывод и экранирование ---
+
+test('вывод обёрнут в jira-doc', () => {
+    assert.match(parseJiraWiki('текст'), /^<div class="jira-doc">/);
+});
+
+test('опасные символы экранируются', () => {
+    const html = parseJiraWiki('<script>alert(1)</script> & "кавычки"');
+    assert.ok(!/<script>/.test(html));
+    assert.match(html, /&lt;script&gt;/);
+    assert.match(html, /&amp;/);
+});
+
+test('пустой ввод даёт пустую строку', () => {
+    assert.strictEqual(parseJiraWiki(''), '');
+});
+
+// --- то, что работало раньше, продолжает работать (из tests/e2e/fixtures/wiki-samples.ts) ---
+
+test('образцы из wiki-samples по-прежнему разбираются', () => {
+    assert.match(parseJiraWiki('This is *bold* text'), /<strong>bold<\/strong>/);
+    assert.match(parseJiraWiki('This is _italic_ text'), /<em>italic<\/em>/);
+    assert.match(parseJiraWiki('Use {{var}} here'), /<code>var<\/code>/);
+    assert.match(parseJiraWiki('-deleted- text'), /<s>deleted<\/s>/);
+    const h = parseJiraWiki('h2. Title');
+    assert.match(h, /<h2>/); assert.match(h, /Title/); assert.match(h, /<\/h2>/);
+    const cb = parseJiraWiki('{code}print("hi"){code}');
+    assert.match(cb, /<pre class="jira-code">/); assert.match(cb, /<code>/); assert.match(cb, /print/);
+    const link = parseJiraWiki('[text|https://example.com]');
+    assert.match(link, /<a href="https:\/\/example\.com"/); assert.match(link, /text/);
 });
