@@ -199,9 +199,14 @@ async def websocket_endpoint(websocket: WebSocket):
                                     )
                     elif msg_type == "vote":
                         point = msg.get("point")
-                        vote_username = msg.get("username")
-                        if game and vote_username and point:
-                            if point not in game.get_points():
+                        raw_vote_username = msg.get("username")
+                        if game and raw_vote_username and point:
+                            vote_username = validate_username(raw_vote_username)
+                            if not vote_username:
+                                await websocket.send_json(
+                                    {"type": "error", "message": "Недопустимое имя участника"}
+                                )
+                            elif point not in game.get_points():
                                 err_msg = f"Point '{point}' is not in the current scale" f" ({game.scale_name})"
                                 await websocket.send_json({"type": "error", "message": err_msg})
                             else:
