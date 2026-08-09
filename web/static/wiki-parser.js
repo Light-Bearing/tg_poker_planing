@@ -11,6 +11,7 @@
     // Именно это правило не даёт превратить user_name_id в курсив, а C++ — в подчёркивание.
     const OPEN_BEFORE = /[\s(\[{«"'—–-]/;   // начало строки тоже годится
     const CLOSE_AFTER = /[\s)\]}»"'.,;:!?—–-]/; // конец строки тоже годится
+    const WHITESPACE = /\s/;
 
     function canOpenAt(text, i) {
         return i === 0 || OPEN_BEFORE.test(text[i - 1]);
@@ -18,6 +19,22 @@
 
     function canCloseAt(text, i) {
         return i === text.length - 1 || CLOSE_AFTER.test(text[i + 1]);
+    }
+
+    // Вторая половина правила границ: Jira требует, чтобы выделяемая фраза не
+    // начиналась и не заканчивалась пробелом. Без этой проверки обычная проза
+    // становится разметкой — "Иванов - разработка, Петров - тестирование"
+    // превращалось в зачёркивание, а "Итого 2 + 2 + 2" — в подчёркивание.
+    function innerOpenAt(text, i) {
+        const next = text[i + 1];
+        return next !== undefined && !WHITESPACE.test(next);
+    }
+
+    function innerCloseAt(text, i) {
+        // Закрыватель ищется при j > i + 1, поэтому text[i - 1] — всегда
+        // символ содержимого, а не сам открывающий маркер.
+        const prev = text[i - 1];
+        return prev !== undefined && !WHITESPACE.test(prev);
     }
 
     const MARKERS = {
@@ -182,13 +199,13 @@
             // 7. Парные маркеры *_-+^~
             if (Object.prototype.hasOwnProperty.call(MARKERS, ch)) {
                 const boundarySensitive = BOUNDARY_SENSITIVE.has(ch);
-                if (!boundarySensitive || canOpenAt(text, i)) {
+                if (!boundarySensitive || (canOpenAt(text, i) && innerOpenAt(text, i))) {
                     // Ищем ближайший такой же символ правее с непустым содержимым между ними.
                     let j = i + 1;
                     let found = -1;
                     while (j < text.length) {
                         if (text[j] === ch && j > i + 1) {
-                            if (!boundarySensitive || canCloseAt(text, j)) {
+                            if (!boundarySensitive || (canCloseAt(text, j) && innerCloseAt(text, j))) {
                                 found = j;
                                 break;
                             }
