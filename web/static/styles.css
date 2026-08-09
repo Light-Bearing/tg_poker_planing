@@ -2411,3 +2411,8 @@ code {
 .light-theme .btn-success label input[type="checkbox"] {
     accent-color: var(--accent);
 }
+
+.session-scale-selector {
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}

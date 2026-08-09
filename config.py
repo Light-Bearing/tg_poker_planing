@@ -15,6 +15,7 @@ DB_PATH = os.getenv("PP_BOT_DB_PATH", "/tmp/tg_pp_bot.db")
 PROXY_URL = os.environ.get("PROXY_URL")
 WEB_CHAT_ID = "web"
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+SESSION_CLEANUP_INTERVAL = float(os.getenv("SESSION_CLEANUP_INTERVAL", 600))
 
 GREETING = """\
 Use /poker task url or description to start game.

@@ -1,6 +1,6 @@
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -10,7 +10,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 import state
-from config import CORS_ORIGINS, logger
+from config import CORS_ORIGINS, SESSION_CLEANUP_INTERVAL, logger
 from connection import manager
 from ppbot.game import GameRegistry
 from telegram_bot import init_bot, telegram_webhook
@@ -48,6 +48,21 @@ async def shutdown_app(app: Starlette) -> None:
     logger.info("Shutdown complete")
 
 
+async def session_cleanup_loop(interval: float) -> None:
+    """Периодически убирает из памяти сессии без активных подключений
+    и протухшие записи rate-limiter'а."""
+    from web_api import evict_stale_rate_limits
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            manager.cleanup_old_sessions()
+            evict_stale_rate_limits()
+        except Exception:
+            # Один сбойный тик не должен останавливать уборку навсегда.
+            logger.exception("Session cleanup tick failed")
+
+
 async def build_app():
     state.storage = GameRegistry()
     state.templates = Jinja2Templates(directory="web/templates")
@@ -66,8 +81,8 @@ async def build_app():
         Route("/api/sessions/{session_id}/scale", api_set_scale, methods=["POST"]),
         Route("/api/sessions/{session_id}/auto-reveal", api_set_auto_reveal, methods=["POST"]),
         Route("/api/sessions/{session_id}/kick", api_kick_user, methods=["POST"]),
-        Route("/custom-scale", api_get_custom_scale, methods=["GET"]),
-        Route("/custom-scale", api_save_custom_scale, methods=["POST"]),
+        Route("/api/custom-scale", api_get_custom_scale, methods=["GET"]),
+        Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
         Route("/info", info, methods=["GET"]),
         Route("/extension/download", download_extension, methods=["GET"]),
@@ -77,8 +92,14 @@ async def build_app():
 
     @asynccontextmanager
     async def lifespan(app):
-        yield
-        await shutdown_app(app)
+        cleanup_task = asyncio.create_task(session_cleanup_loop(SESSION_CLEANUP_INTERVAL))
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
+            await shutdown_app(app)
 
     starlette_app = Starlette(
         routes=routes,

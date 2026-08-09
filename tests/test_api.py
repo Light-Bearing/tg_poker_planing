@@ -7,7 +7,7 @@ from starlette.testclient import TestClient
 
 import state
 from connection import manager
-from ppbot.game import GameRegistry
+from ppbot.game import SCALES, GameRegistry
 from web_api import (
     api_create_session,
     api_get_custom_scale,
@@ -30,11 +30,12 @@ from websocket_handler import websocket_endpoint
 
 @pytest.fixture(autouse=True)
 def _setup_state(tmp_path):
-    state.storage = GameRegistry()
+    registry = GameRegistry()
+    state.storage = registry
     db_path = str(tmp_path / "test.db")
 
     async def _init():
-        await state.storage.init_db(db_path)
+        await registry.init_db(db_path)
 
     import asyncio
 
@@ -46,7 +47,7 @@ def _setup_state(tmp_path):
     yield
 
     async def _close():
-        await state.storage.close()
+        await registry.close()
 
     asyncio.run(_close())
 
@@ -281,14 +282,19 @@ class TestScale:
         resp = client.post("/api/sessions/nonexistent/scale", json={"username": "Alice", "scale_name": "fibonacci"})
         assert resp.status_code == 404
 
-    def test_set_scale_invalid_falls_back_to_default(self, client):
+    def test_set_scale_unknown_name_rejected(self, client):
+        """Опечатка в scale_name должна быть ошибкой, а не молчаливым сбросом голосов."""
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
+        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
 
         resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "bogus"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["scale_name"] == "custom"
+        assert resp.status_code == 400
+        assert "bogus" in resp.json()["error"]
+
+        after = client.get(f"/api/sessions/{session_id}").json()
+        assert after["scale_name"] == "custom", "шкала не должна меняться"
+        assert after["vote_count"] == 1, "голоса не должны сбрасываться при опечатке"
 
 
 class TestCustomScale:
@@ -372,6 +378,66 @@ class TestCustomScale:
         assert data["scale_name"] == "custom"
         # Should include saved custom points
         assert data["available_points"] == points
+
+
+SCALE_POINT_ERROR = "Each point must be 1-8 characters: letters, digits, and . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+
+
+class TestCustomScalePointValidation:
+    """Значение точки шкалы попадает в innerHTML на фронте — валидируем на входе."""
+
+    def _points_with(self, bad: str) -> list[str]:
+        return ["1", "2", "3", "4", "5", "6", "7", bad]
+
+    def test_rejects_html_payload(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "Alice", "points": self._points_with('<img src=x onerror="alert(1)">')},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == SCALE_POINT_ERROR
+
+    def test_rejects_quotes_and_ampersand(self, client):
+        for bad in ['"', "'", "&", "`", "<b>", "a>b"]:
+            resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with(bad)})
+            assert resp.status_code == 400, f"{bad!r} должен быть отклонён"
+
+    def test_rejects_too_long_point(self, client):
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with("123456789")})
+        assert resp.status_code == 400
+
+    def test_rejects_blank_point(self, client):
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with("   ")})
+        assert resp.status_code == 400
+
+    def test_accepts_builtin_scale_values(self, client):
+        """Значения встроенных шкал должны проходить валидацию."""
+        for scale_name, points in SCALES.items():
+            padded = points if len(points) >= 8 else points + [f"x{i}" for i in range(8 - len(points))]
+            resp = client.post("/api/custom-scale", json={"username": "Alice", "points": padded})
+            assert resp.status_code == 200, f"шкала {scale_name} отклонена: {resp.json()}"
+
+    def test_accepts_plain_labels(self, client):
+        points = ["1", "2.5", "13", "XS", "XXL", "½", "❔", "☕", "Оценка"]
+        resp = client.post("/api/custom-scale", json={"username": "Alice", "points": points})
+        assert resp.status_code == 200
+        assert resp.json()["points"] == points
+
+    def test_poisoned_point_never_becomes_votable(self, client):
+        """Сквозная проверка: отравленную точку нельзя ни сохранить, ни за неё проголосовать."""
+        payload = '<img src=x onerror="alert(1)">'
+        save = client.post("/api/custom-scale", json={"username": "Alice", "points": self._points_with(payload)})
+        assert save.status_code == 400
+
+        created = client.post(
+            "/api/sessions", json={"username": "Alice", "text": "task", "scale_name": "custom"}
+        ).json()
+        assert payload not in created["available_points"]
+
+        vote = client.post(
+            f"/api/sessions/{created['session_id']}/vote", json={"username": "Alice", "point": payload}
+        )
+        assert vote.status_code == 400
 
 
 class TestKick:
@@ -459,3 +525,88 @@ class TestAutoRevealApi:
         assert resp.status_code == 200
         data = resp.json()
         assert data["auto_reveal"] is True
+
+
+BAD_NAME = "<img src=x onerror=alert(1)>"
+NAME_ERROR = "Username must be 1-32 characters: letters, digits, spaces, - . _"
+
+
+class TestUsernameValidation:
+    def test_create_session_rejects_bad_username(self, client):
+        r = client.post("/api/sessions", json={"username": BAD_NAME, "text": "task"})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_create_session_accepts_cyrillic(self, client):
+        r = client.post("/api/sessions", json={"username": "Аня", "text": "task"})
+        assert r.status_code == 200
+        assert r.json()["initiator_name"] == "Аня"
+
+    def test_vote_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/vote", json={"username": BAD_NAME, "point": "5"})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_restart_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/restart", json={"username": BAD_NAME})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+    def test_reveal_rejects_bad_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(f"/api/sessions/{created['session_id']}/reveal", json={"username": BAD_NAME})
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+        assert client.get(f"/api/sessions/{created['session_id']}").json()["revealed"] is False
+
+    def test_kick_rejects_bad_target_username(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        r = client.post(
+            f"/api/sessions/{created['session_id']}/kick",
+            json={"username": "alice", "target_username": BAD_NAME},
+        )
+        assert r.status_code == 400
+        assert r.json()["error"] == NAME_ERROR
+
+
+class TestVoteSecrecy:
+    def test_real_point_hidden_until_reveal(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+
+        before = client.get(f"/api/sessions/{sid}").json()
+        assert before["votes"], "голос должен быть записан"
+        assert all("real_point" not in v for v in before["votes"]), "real_point must be hidden before reveal"
+        assert "average" not in before, "average must be hidden before reveal"
+
+        client.post(f"/api/sessions/{sid}/reveal", json={"username": "alice"})
+
+        after = client.get(f"/api/sessions/{sid}").json()
+        assert after["votes"][0]["real_point"] == "5", "real_point must be present after reveal"
+        assert "average" in after, "average must be present after reveal"
+        assert after["average"] == 5.0, "average must equal the single vote"
+
+
+class TestScaleChangeResetsVotes:
+    def test_rest_set_scale_clears_votes(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+        assert client.get(f"/api/sessions/{sid}").json()["vote_count"] == 1
+
+        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "alice", "scale_name": "fibonacci"})
+        assert r.status_code == 200
+
+        after = client.get(f"/api/sessions/{sid}").json()
+        assert after["scale_name"] == "fibonacci"
+        assert after["vote_count"] == 0
+        assert after["revealed"] is False
+
+    def test_rest_set_scale_rejected_for_non_initiator(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "bob", "scale_name": "fibonacci"})
+        assert r.status_code == 403

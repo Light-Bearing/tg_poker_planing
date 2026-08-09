@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,10 +20,11 @@ def _reset_manager():
 
 @pytest.fixture(autouse=True)
 async def _game_storage(tmp_path):
-    state.storage = GameRegistry()
-    await state.storage.init_db(str(tmp_path / "test.db"))
+    registry = GameRegistry()
+    state.storage = registry
+    await registry.init_db(str(tmp_path / "test.db"))
     yield
-    await state.storage.close()
+    await registry.close()
 
 
 @pytest.fixture
@@ -617,6 +619,22 @@ class TestWebSocketEndpoint:
         updated = await state.storage.get_game("web", "test-session")
         assert updated.initiator.id == "web_bob"
 
+    @pytest.mark.asyncio
+    async def test_join_rejects_invalid_username(self, ws):
+        """WebSocket join with an invalid/dangerous username is rejected and never registered."""
+        bad_name = "<img src=x onerror=alert(1)>"
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": bad_name}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        error_calls = [call for call in ws.send_json.await_args_list if call.args[0].get("type") == "error"]
+        assert len(error_calls) >= 1
+        assert error_calls[0].args[0]["message"] == "Недопустимое имя участника"
+
+        assert manager.session_users.get("test-session", {}) == {}
+
 
 class TestCheckAutoReveal:
     @pytest.mark.asyncio
@@ -764,3 +782,161 @@ class TestWebSocketVoteValidation:
         message = error_calls[0].args[0].get("message", "")
         assert "99" in message
         assert "fibonacci" in message
+
+    @pytest.mark.asyncio
+    async def test_websocket_vote_rejects_invalid_username(self, ws):
+        """WebSocket vote with an invalid/dangerous username is rejected and never stored."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+
+        bad_name = "<img src=x onerror=alert(1)>"
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "vote", "username": bad_name, "point": "5"}),
+            WebSocketDisconnect(),
+        ]
+        ws.send_json.reset_mock()
+        await websocket_endpoint(ws)
+
+        error_calls = [call for call in ws.send_json.await_args_list if call.args[0].get("type") == "error"]
+        assert len(error_calls) >= 1
+        assert error_calls[0].args[0]["message"] == "Недопустимое имя участника"
+
+        stored_game = await state.storage.get_game("web", "test-session")
+        assert stored_game.votes == {}
+
+
+class TestWebSocketJoinValidation:
+    @pytest.mark.asyncio
+    async def test_rejected_join_does_not_clobber_earlier_username(self, ws):
+        """Отклонённый join не должен стирать имя, под которым сокет уже вошёл:
+        иначе на disconnect соединение остаётся зарегистрированным навсегда."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": "alice"}),
+            json.dumps({"type": "join", "username": "<img src=x onerror=alert(1)>"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert errors, "на недопустимое имя должна прийти ошибка"
+        assert errors[0].args[0]["message"] == "Недопустимое имя участника"
+
+        assert manager.is_ws_connected("test-session", "alice") is False, "мёртвый сокет остался зарегистрированным"
+        assert manager.get_ws_by_username("test-session", "alice") is None
+
+
+class TestWebSocketFreshGame:
+    @pytest.mark.asyncio
+    async def test_vote_does_not_wipe_votes_cast_after_connect(self, ws):
+        """Алиса подключилась, Боб проголосовал «снаружи», Алиса голосует по WS.
+        Голос Боба должен уцелеть — значит обработчик читал игру заново."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+
+        messages = iter(
+            [
+                '{"type": "join", "username": "alice"}',
+                "__external_vote__",
+                '{"type": "vote", "username": "alice", "point": "3"}',
+            ]
+        )
+
+        async def receive_text():
+            try:
+                nxt = next(messages)
+            except StopIteration:
+                raise WebSocketDisconnect() from None
+            if nxt == "__external_vote__":
+                # Эмулируем голос Боба через REST: отдельное чтение и запись игры
+                fresh = await state.storage.get_game("web", "test-session")
+                fresh.add_vote({"id": "web_bob", "first_name": "bob", "username": "bob"}, "5")
+                await state.storage.save_game(fresh)
+                return "ping"
+            return nxt
+
+        ws.receive_text.side_effect = receive_text
+
+        await websocket_endpoint(ws)
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert "web_bob" in saved.votes, "голос Боба затёрт устаревшим объектом игры"
+        assert "web_alice" in saved.votes
+        assert saved.votes["web_bob"].point == "5"
+
+
+class TestWebSocketSetScale:
+    @pytest.mark.asyncio
+    async def test_set_scale_by_initiator_applies_and_resets_votes(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+        manager.update_user_vote("test-session", "alice", {"point": "5"})
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "tshirt", "username": "alice"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "tshirt"
+        assert dict(saved.votes) == {}
+        assert saved.revealed is False
+        assert manager.session_users["test-session"]["alice"]["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_set_scale_unknown_name_returns_error_and_keeps_votes(self, ws):
+        """Неизвестная шкала: клиент получает ошибку, голоса и шкала не трогаются."""
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        game.add_vote({"id": "web_alice", "first_name": "Alice", "username": "alice"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "alice")
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "bogus", "username": "alice"}',
+            WebSocketDisconnect(),
+        ]
+        ws.send_json.reset_mock()
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert errors, "на неизвестную шкалу должна прийти ошибка"
+        assert errors[0].args[0]["message"] == "Неизвестная шкала оценок"
+
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "custom"
+        assert "web_alice" in saved.votes, "голоса не должны сбрасываться при опечатке"
+
+    @pytest.mark.asyncio
+    async def test_set_scale_by_non_initiator_returns_error(self, ws):
+        game = state.storage.new_game(
+            "web", "test-session", {"id": "web_alice", "first_name": "Alice", "username": "alice"}, "task"
+        )
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "bob")
+
+        ws.receive_text.side_effect = [
+            '{"type": "set_scale", "scale_name": "tshirt", "username": "bob"}',
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        errors = [c for c in ws.send_json.await_args_list if c[0][0].get("type") == "error"]
+        assert errors, "не-инициатор должен получить сообщение об ошибке"
+        saved = await state.storage.get_game("web", "test-session")
+        assert saved.scale_name == "custom"
