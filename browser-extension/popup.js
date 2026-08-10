@@ -251,7 +251,7 @@ function explainProbe(result) {
 function describeOriginStrip(state) {
   if (state === 'active') return 'включена';
   if (state === 'inactive') return 'выключена (адрес Jira не разобран)';
-  if (state === 'unsupported') return 'недоступна (только Firefox)';
+  if (state === 'unsupported') return 'не нужна (Chrome не добавляет Origin)';
   return state || 'неизвестно';
 }
 
@@ -308,9 +308,9 @@ async function runDiagnose() {
   });
   lines.push('Все PUT идут на несуществующую задачу ZZZZ-99999 с пустым набором полей,');
   lines.push('проба 4 — поиск. Ни одна ничего не меняет в Jira.');
-  lines.push('Проба 3 — боевые условия. Пробы 5-9 отличаются от неё ровно одним условием,');
-  lines.push('сравнивать их надо именно с пробой 3.');
-  lines.push('404 вместо 403 в любой из проб 5-9 — найдено условие, из-за которого режут.');
+  lines.push('Проба 3 — боевые условия. Пробы 5-9 отличаются от неё ровно одним условием.');
+  lines.push('Ожидается: 3 даёт 404 (запись доходит), 5, 6 и 9 — 403 (проверке нужен');
+  lines.push('Origin, совпадающий с адресом Jira). 403 в пробе 3 — отправка снова сломана.');
   lines.push('«сработала 0 раз» при включённой правке — значит слушатель не отработал,');
   lines.push('и пробы 5, 6, 9 ничего не проверили.');
   lines.push('Строка заголовков говорит, кто ответил: Jira (X-AUSERNAME, X-Seraph-*) или прокси (Server).');

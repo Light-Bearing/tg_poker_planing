@@ -109,8 +109,9 @@ function names(headers) {
 test('режим берётся из метки, без метки — боевой', () => {
     assert.strictEqual(probeMode([{ name: PROBE_HEADER, value: 'jira-origin' }]), 'jira-origin');
     assert.strictEqual(probeMode([{ name: 'x-pp-probe', value: 'bare' }]), 'bare');
-    assert.strictEqual(probeMode([{ name: 'Authorization', value: 'Bearer t' }]), 'strip-origin');
-    assert.strictEqual(probeMode([]), 'strip-origin');
+    // Боевой режим — подмена Origin на адрес Jira: измерено, что только с ней запись доходит
+    assert.strictEqual(probeMode([{ name: 'Authorization', value: 'Bearer t' }]), 'jira-origin');
+    assert.strictEqual(probeMode([]), 'jira-origin');
 });
 
 test('метка режима снимается при любом режиме — до Jira она не доходит', () => {
