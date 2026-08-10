@@ -113,11 +113,12 @@ test('короткий или пустой токен не превращает 
 });
 
 test('ни одна проба диагностики не может ничего записать в Jira', () => {
-    assert.strictEqual(DIAGNOSE_PROBES.length, 4);
+    assert.ok(DIAGNOSE_PROBES.length >= 4);
 
-    const put = DIAGNOSE_PROBES.find(p => p.method === 'PUT');
     // Пустой fields Jira отвергнет, даже если задача существует
-    assert.deepStrictEqual(put.payload, { fields: {} });
+    for (const put of DIAGNOSE_PROBES.filter(p => p.method === 'PUT')) {
+        assert.deepStrictEqual(put.payload, { fields: {} }, `проба ${put.step}`);
+    }
 
     const posts = DIAGNOSE_PROBES.filter(p => p.method === 'POST');
     assert.strictEqual(posts.length, 1);
