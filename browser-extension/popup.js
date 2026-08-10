@@ -246,12 +246,12 @@ function explainProbe(result) {
 }
 
 // Диагностика: четыре пробы через background, результат текстом в <pre>
-// Состояние снятия Origin понятными словами. Firefox добавляет к запросам расширения
-// Origin: moz-extension://…, и Jira Server отвечает на него «XSRF check failed».
+// Состояние правки исходящих заголовков понятными словами.
+// Правка идёт через webRequest и доступна только в Firefox.
 function describeOriginStrip(state) {
-  if (state === 'active') return 'включено';
-  if (state === 'inactive') return 'выключено (адрес Jira не разобран)';
-  if (state === 'unsupported') return 'не требуется (Chrome не добавляет Origin)';
+  if (state === 'active') return 'включена';
+  if (state === 'inactive') return 'выключена (адрес Jira не разобран)';
+  if (state === 'unsupported') return 'недоступна (только Firefox)';
   return state || 'неизвестно';
 }
 
@@ -269,7 +269,7 @@ async function runDiagnose() {
 
   const outEl = document.getElementById('diagnoseOutput');
   outEl.classList.remove('hidden');
-  outEl.textContent = 'Выполняются четыре пробы...';
+  outEl.textContent = 'Выполняются пробы...';
 
   let resp;
   try {
@@ -288,23 +288,31 @@ async function runDiagnose() {
   const lines = [
     `Расширение: ${version}`,
     `Jira: ${jiraUrl}`,
-    `Снятие Origin: ${describeOriginStrip(resp.originStrip)}`,
+    `Правка заголовков: ${describeOriginStrip(resp.originStrip)}, сработала ${resp.headerEdits} раз`,
     '',
   ];
   resp.results.forEach((r) => {
     const path = r.url.startsWith(jiraUrl) ? r.url.slice(jiraUrl.length) : r.url;
+    lines.push(`${r.step}. ${r.method} ${path}${r.note ? ` — ${r.note}` : ''}`);
+    if (r.skipped) {
+      lines.push(`   ${r.body}`);
+      lines.push('');
+      return;
+    }
     const code = r.status === 0 ? 'нет ответа' : `HTTP ${r.status}`;
-    lines.push(`${r.step}. ${r.method} ${path}`);
     lines.push(`   ${code} — ${explainProbe(r)}`);
     const headers = Object.entries(r.headers || {}).map(([k, v]) => `${k}: ${v}`);
     lines.push(`   ${headers.length ? headers.join(' | ') : '(нужных заголовков нет)'}`);
     lines.push(`   ${r.body || '(пустое тело)'}`);
     lines.push('');
   });
-  lines.push('Проба 3 — PUT на несуществующую задачу ZZZZ-99999 с пустым набором полей.');
-  lines.push('Проба 4 — поиск: POST с телом, писать не может. Ни одна ничего не меняет.');
-  lines.push('404 в пробе 3 — хорошо: запись доходит до Jira. 403 или HTML — режут по пути.');
-  lines.push('403 «XSRF check failed» при включённом снятии Origin — причина не в нём.');
+  lines.push('Все PUT идут на несуществующую задачу ZZZZ-99999 с пустым набором полей,');
+  lines.push('проба 4 — поиск. Ни одна ничего не меняет в Jira.');
+  lines.push('Проба 3 — боевые условия. Пробы 5-9 отличаются от неё ровно одним условием,');
+  lines.push('сравнивать их надо именно с пробой 3.');
+  lines.push('404 вместо 403 в любой из проб 5-9 — найдено условие, из-за которого режут.');
+  lines.push('«сработала 0 раз» при включённой правке — значит слушатель не отработал,');
+  lines.push('и пробы 5, 6, 9 ничего не проверили.');
   lines.push('Строка заголовков говорит, кто ответил: Jira (X-AUSERNAME, X-Seraph-*) или прокси (Server).');
 
   outEl.textContent = lines.join('\n');
