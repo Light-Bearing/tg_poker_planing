@@ -246,21 +246,37 @@
                 <div class="step">
                     <div class="step-number">2</div>
                     <div class="step-content">
-                        <h3>Нажмите "Временная загрузка дополнения..."</h3>
-                        <p>Кнопка находится в центре страницы</p>
+                        <h3>Удалите прежнюю копию</h3>
+                        <p>Если в списке уже есть <strong>PP Jira Bridge</strong> — нажмите у него «Удалить». Распакуйте свежий ZIP в <strong>новую пустую папку</strong>, а старую распакованную папку сотрите: если загрузить её по привычке, Firefox поднимет прошлую сборку, и новых кнопок в ней не будет.</p>
                     </div>
                 </div>
 
                 <div class="step">
                     <div class="step-number">3</div>
                     <div class="step-content">
-                        <h3>Выберите файл manifest</h3>
-                        <p>Распакуйте ZIP и выберите файл <code>manifest-firefox.json</code></p>
+                        <h3>Нажмите "Временная загрузка дополнения..."</h3>
+                        <p>Кнопка находится в центре страницы</p>
                     </div>
                 </div>
 
                 <div class="step">
                     <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Выберите файл manifest</h3>
+                        <p>В распакованной папке выберите <code>manifest.json</code>. В архиве для Firefox он уже собран под Firefox — отдельного <code>manifest-firefox.json</code> в нём нет.</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <h3>Проверьте версию</h3>
+                        <p>Откройте popup расширения (кнопка ⧩ «Расширения» справа от адресной строки → <strong>PP Jira Bridge</strong>). В заголовке рядом с названием стоит номер версии — он должен быть <code>v1.1.0</code> или новее. Если версии нет вовсе, загружена старая сборка.</p>
+                    </div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">6</div>
                     <div class="step-content">
                         <h3>Обновите Planning Poker</h3>
                         <p>Вернитесь на страницу и обновите её (<code>F5</code>)</p>
