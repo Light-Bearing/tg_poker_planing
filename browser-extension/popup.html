@@ -48,15 +48,18 @@
       font-size: 13px;
       color: #444;
     }
-    input, select {
+    input, select, textarea {
       width: 100%;
       padding: 8px;
       border: 1px solid #ddd;
       border-radius: 4px;
       font-size: 13px;
       margin-bottom: 10px;
+      box-sizing: border-box;
+      font-family: inherit;
+      resize: vertical;
     }
-    input:focus, select:focus {
+    input:focus, select:focus, textarea:focus {
       outline: none;
       border-color: #0052CC;
     }
@@ -159,9 +162,22 @@
     
     <button id="testConnection" class="btn-secondary">Проверить подключение</button>
     <button id="runDiagnose" class="btn-secondary">Диагностика</button>
-    <div class="help-text">Четыре пробы, включая методы PUT и POST. Ничего не меняет в Jira.</div>
+    <div class="help-text">Девять проб, включая методы PUT и POST. Ничего не меняет в Jira.</div>
     <div id="connectionStatus" class="status hidden"></div>
     <pre id="diagnoseOutput" class="diagnose-output hidden"></pre>
+  </div>
+
+  <!-- Раздел доступа -->
+  <div class="section">
+    <div class="section-title">Доступ со страниц</div>
+
+    <label for="allowedOrigins">Адреса Planning Poker</label>
+    <textarea id="allowedOrigins" rows="3" placeholder="https://planning.example.ru&#10;http://localhost:8000"></textarea>
+    <div class="help-text">
+      По одному адресу в строке, только схема и хост. Страницы с других адресов
+      расширение не обслуживает: иначе любой открытый сайт мог бы запросить у него
+      сохранённый токен Jira. Пока список пуст, работает только этот popup.
+    </div>
   </div>
 
   <!-- Раздел полей -->

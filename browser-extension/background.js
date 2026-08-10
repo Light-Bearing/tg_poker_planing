@@ -48,6 +48,67 @@ function jiraAuth(token, extra = {}, atlassianToken = 'no-check') {
 // Требует разрешений webRequest и webRequestBlocking; они добавлены только в
 // manifest-firefox.json. В Chrome api.webRequest отсутствует, и код становится пустышкой.
 
+// --- Кто вправе обращаться к мосту ---
+//
+// content.js объявлен на <all_urls> и ретранслирует в background любое сообщение
+// с меткой source: 'pp-jira-page'. Без проверки происхождения любая открытая страница
+// одним postMessage получала сохранённый токен Jira по типу getSettings, а также могла
+// перезаписать настройки и отправлять запросы от имени владельца.
+//
+// Поэтому страницы обслуживаются только с адресов, которые владелец сам разрешил
+// в popup расширения. Список пуст — мост для страниц закрыт целиком: это осознанно,
+// закрыто по умолчанию. Сам popup под правило не подпадает: у его сообщений нет
+// sender.tab, подделать это со страницы нельзя.
+const ORIGIN_NOT_ALLOWED = 'ORIGIN_NOT_ALLOWED';
+
+// Приводит адрес к виду «схема://хост[:порт]». null — если разобрать не удалось.
+function normalizeOrigin(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    try {
+        const u = new URL(text);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        return `${u.protocol}//${u.host}`.toLowerCase();
+    } catch (_) {
+        return null;
+    }
+}
+
+// Разбирает список из поля popup: по одному адресу в строке, пустые строки и мусор
+// отбрасываются молча — иначе опечатка тихо открыла бы мост не тому адресу.
+function parseAllowedOrigins(text) {
+    return String(text || '')
+        .split(/[\s,;]+/)
+        .map(normalizeOrigin)
+        .filter(Boolean);
+}
+
+// Пришло ли сообщение со страницы (а не из popup расширения)
+function isPageSender(sender) {
+    return Boolean(sender && sender.tab);
+}
+
+// Происхождение отправителя. sender.tab и sender.url проставляет сам браузер,
+// страница на них влиять не может.
+function senderOrigin(sender) {
+    if (!sender) return null;
+    return normalizeOrigin(sender.origin || sender.url);
+}
+
+function isAllowedOrigin(origin, allowed) {
+    if (!origin) return false;
+    return (allowed || []).includes(origin);
+}
+
+// Чтение хранилища одинаково в обоих браузерах: browser.* отвечает промисом,
+// chrome.* в MV3 тоже, но старая форма с колбэком встречается — поддерживаем обе.
+function storageGet(keys) {
+    const result = storage.local.get(keys);
+    if (result && typeof result.then === 'function') return result;
+    return new Promise(resolve => storage.local.get(keys, resolve));
+}
+
 // Метка режима правки. Снимается слушателем, наружу не уходит.
 const PROBE_HEADER = 'X-PP-Probe';
 
@@ -343,25 +404,49 @@ function friendlyError(err) {
 }
 
 function handleMessage(message, sender, sendResponse) {
+    // Ворота: страницы обслуживаем только с разрешённых владельцем адресов.
+    // Проверка идёт до любой работы с хранилищем и сетью, поэтому неразрешённая
+    // страница не получает ни токена, ни возможности что-то отправить от имени владельца.
+    if (isPageSender(sender)) {
+        const origin = senderOrigin(sender);
+        storageGet(['allowedOrigins']).then((result) => {
+            if (isAllowedOrigin(origin, result && result.allowedOrigins)) {
+                handleTrustedMessage(message, sendResponse, false);
+            } else {
+                sendResponse({ ok: false, error: ORIGIN_NOT_ALLOWED, origin: origin || '' });
+            }
+        });
+        return true;
+    }
+    return handleTrustedMessage(message, sendResponse, true);
+}
+
+// fromPopup — сообщение пришло из интерфейса самого расширения. Только оно вправе
+// менять список разрешённых адресов: иначе разрешённая однажды страница смогла бы
+// дописать в него соседей, и одной XSS на ней хватило бы, чтобы открыть мост кому угодно.
+function handleTrustedMessage(message, sendResponse, fromPopup) {
     // Сохранить настройки
     if (message.type === 'saveSettings') {
         // Адрес Jira поменялся — слушатель Origin должен слушать новый хост
         refreshOriginStrip(message.jiraUrl);
-        storage.local.set({
+        const settings = {
             jiraUrl: message.jiraUrl,
             jiraToken: message.jiraToken,
             jiraFilter: message.jiraFilter,
             storyPointsField: message.storyPointsField,
             epicLinkField: message.epicLinkField || '',
-        }).then(() => sendResponse({ ok: true }));
+        };
+        if (fromPopup && 'allowedOrigins' in message) {
+            settings.allowedOrigins = parseAllowedOrigins(message.allowedOrigins);
+        }
+        Promise.resolve(storage.local.set(settings)).then(() => sendResponse({ ok: true }));
         return true;
     }
 
     // Получить настройки
     if (message.type === 'getSettings') {
-        storage.local.get(['jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField'], (result) => {
-            sendResponse(result);
-        });
+        storageGet(['jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField', 'allowedOrigins'])
+            .then(result => sendResponse(result));
         return true;
     }
 
@@ -480,5 +565,7 @@ if (typeof module !== 'undefined' && module.exports) {
         describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES,
         jiraOriginPattern, isOwnRequest, withoutOriginHeaders,
         jiraAuth, jiraOriginValue, probeMode, applyHeaderMode, PROBE_HEADER,
+        normalizeOrigin, parseAllowedOrigins, isPageSender, senderOrigin, isAllowedOrigin,
+        ORIGIN_NOT_ALLOWED,
     };
 }

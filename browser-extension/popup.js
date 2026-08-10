@@ -67,14 +67,16 @@ async function loadSettings() {
       'jiraToken',
       'jiraFilter',
       'storyPointsField',
-      'epicLinkField'
+      'epicLinkField',
+      'allowedOrigins'
     ]);
-    
+
     document.getElementById('jiraUrl').value = result.jiraUrl || '';
     document.getElementById('jiraToken').value = result.jiraToken || '';
     document.getElementById('jiraFilter').value = result.jiraFilter || '';
     document.getElementById('storyPointsField').value = result.storyPointsField || '';
     document.getElementById('epicLinkField').value = result.epicLinkField || '';
+    document.getElementById('allowedOrigins').value = (result.allowedOrigins || []).join('\n');
   } catch (err) {
     console.error('Error loading settings:', err);
   }
@@ -87,6 +89,7 @@ async function saveSettings() {
   const jiraFilter = document.getElementById('jiraFilter').value.trim();
   const storyPointsField = document.getElementById('storyPointsField').value.trim();
   const epicLinkField = document.getElementById('epicLinkField').value.trim();
+  const allowedOrigins = document.getElementById('allowedOrigins').value;
 
   if (!jiraUrl || !jiraToken) {
     showStatus('connectionStatus', 'Укажите URL Jira и API Token', 'error');
@@ -94,13 +97,20 @@ async function saveSettings() {
   }
 
   try {
-    await browser.storage.local.set({
+    // Сохраняем через background, а не в хранилище напрямую: там же разбирается список
+    // адресов и переподнимается слушатель заголовков под новый хост Jira.
+    const resp = await browser.runtime.sendMessage({
+      type: 'saveSettings',
       jiraUrl,
       jiraToken,
       jiraFilter,
       storyPointsField,
-      epicLinkField
+      epicLinkField,
+      allowedOrigins,
     });
+    if (!resp || !resp.ok) throw new Error((resp && resp.error) || 'нет ответа');
+    // Показываем разобранный список: опечатку в адресе видно сразу, а не при отказе
+    await loadSettings();
     showStatus('connectionStatus', 'Настройки сохранены!', 'success');
   } catch (err) {
     showStatus('connectionStatus', `Ошибка сохранения: ${err.message}`, 'error');
@@ -115,6 +125,7 @@ async function clearSettings() {
   document.getElementById('jiraFilter').value = '';
   document.getElementById('storyPointsField').value = '';
   document.getElementById('epicLinkField').value = '';
+  document.getElementById('allowedOrigins').value = '';
   document.getElementById('connectionStatus').classList.add('hidden');
   document.getElementById('fieldsList').classList.add('hidden');
   showStatus('connectionStatus', 'Настройки очищены', 'success');
