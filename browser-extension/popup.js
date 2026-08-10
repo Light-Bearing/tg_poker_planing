@@ -246,6 +246,15 @@ function explainProbe(result) {
 }
 
 // Диагностика: четыре пробы через background, результат текстом в <pre>
+// Состояние снятия Origin понятными словами. Firefox добавляет к запросам расширения
+// Origin: moz-extension://…, и Jira Server отвечает на него «XSRF check failed».
+function describeOriginStrip(state) {
+  if (state === 'active') return 'включено';
+  if (state === 'inactive') return 'выключено (адрес Jira не разобран)';
+  if (state === 'unsupported') return 'не требуется (Chrome не добавляет Origin)';
+  return state || 'неизвестно';
+}
+
 async function runDiagnose() {
   // Адрес берём ровно в том виде, в каком его использует отказавший путь: saveSettings
   // делает только trim(), страница шлёт jiraSettings.jiraUrl как есть. Нормализуй мы тут
@@ -276,7 +285,12 @@ async function runDiagnose() {
   }
 
   const version = document.getElementById('extVersion').textContent || 'версия неизвестна';
-  const lines = [`Расширение: ${version}`, `Jira: ${jiraUrl}`, ''];
+  const lines = [
+    `Расширение: ${version}`,
+    `Jira: ${jiraUrl}`,
+    `Снятие Origin: ${describeOriginStrip(resp.originStrip)}`,
+    '',
+  ];
   resp.results.forEach((r) => {
     const path = r.url.startsWith(jiraUrl) ? r.url.slice(jiraUrl.length) : r.url;
     const code = r.status === 0 ? 'нет ответа' : `HTTP ${r.status}`;
@@ -290,6 +304,7 @@ async function runDiagnose() {
   lines.push('Проба 3 — PUT на несуществующую задачу ZZZZ-99999 с пустым набором полей.');
   lines.push('Проба 4 — поиск: POST с телом, писать не может. Ни одна ничего не меняет.');
   lines.push('404 в пробе 3 — хорошо: запись доходит до Jira. 403 или HTML — режут по пути.');
+  lines.push('403 «XSRF check failed» при включённом снятии Origin — причина не в нём.');
   lines.push('Строка заголовков говорит, кто ответил: Jira (X-AUSERNAME, X-Seraph-*) или прокси (Server).');
 
   outEl.textContent = lines.join('\n');
