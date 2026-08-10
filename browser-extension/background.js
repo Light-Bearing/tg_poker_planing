@@ -21,19 +21,25 @@ function jiraAuth(token, extra = {}, atlassianToken = 'no-check') {
 
 // --- Правка исходящих заголовков (только Firefox) ---
 //
-// Диагностика на живой Jira Server (project.samokat.ru): GET проходят, PUT и POST
-// возвращают 403 «XSRF check failed». Ответила сама Jira, не прокси — в ответе
-// X-Seraph-LoginReason: OK и X-AUSERNAME, то есть токен принят и пользователь опознан.
-// Заголовок X-Atlassian-Token: no-check при этом отправлялся.
+// Измерено на живой Jira Server (project.samokat.ru) набором проб, каждая из которых
+// меняла ровно одно условие. Результат:
 //
-// Первая гипотеза — Origin: moz-extension://<uuid>, который Firefox добавляет к запросам
-// расширения, а Chrome не добавляет. Снятие Origin проверено на той же Jira: PUT и POST
-// по-прежнему 403 «XSRF check failed». Гипотеза не подтвердилась, дело не в Origin.
+//   Firefox, Origin: moz-extension://<uuid>  — 403 «XSRF check failed»
+//   Firefox, Origin снят                     — 403 «XSRF check failed»
+//   Firefox, Origin = https://project…       — 404, запрос дошёл до Jira
+//   Chrome, Origin не отправляется вовсе     — 404, запрос дошёл до Jira
 //
-// Поэтому вместо новой догадки — набор проб, каждая из которых меняет ровно одно условие
-// (см. DIAGNOSE_PROBES). Слушатель webRequest даёт править заголовки, которые из fetch
-// не задать: Origin и Sec-Fetch-*. Режим правки передаётся заголовком-меткой X-PP-Probe,
-// которую слушатель снимает — до Jira она не доходит.
+// Значит проверке нужен Origin, совпадающий с адресом Jira. Чужой Origin она отвергает,
+// а на снятие не поддаётся: Firefox добавляет заголовок обратно уже после
+// onBeforeSendHeaders, поэтому удаление из списка ничего не меняет — работает только
+// подмена значения. В Chrome заголовка нет изначально, поэтому там всё и работало.
+//
+// Заголовок X-Atlassian-Token на этом инстансе ни на что не влияет: пробы с no-check,
+// с nocheck и без него вовсе дали одинаковый ответ. Отправлять его продолжаем — на других
+// инстансах Jira он нужен, и вреда от него нет.
+//
+// Режим правки передаётся заголовком-меткой X-PP-Probe, которую слушатель снимает —
+// до Jira она не доходит.
 //
 // Правка применяется только к запросам самого расширения (сверка по originUrl) и только
 // на хосте настроенной Jira. Вкладки пользователя с Jira не затрагиваются: там работает
@@ -45,9 +51,9 @@ function jiraAuth(token, extra = {}, atlassianToken = 'no-check') {
 // Метка режима правки. Снимается слушателем, наружу не уходит.
 const PROBE_HEADER = 'X-PP-Probe';
 
-// Режим по умолчанию для боевых запросов. Origin снимаем: вреда он не приносит,
-// а на других инстансах Jira проверка происхождения существует и мешает.
-const DEFAULT_HEADER_MODE = 'strip-origin';
+// Режим по умолчанию для боевых запросов: Origin = адрес самой Jira.
+// Это то, что измерено пробой 6 — единственное условие, при котором запись доходит.
+const DEFAULT_HEADER_MODE = 'jira-origin';
 
 // Возвращает шаблон адреса для фильтра слушателя. null, если адрес не разбирается.
 function jiraOriginPattern(jiraUrl) {
@@ -87,10 +93,10 @@ function probeMode(requestHeaders) {
 
 // Правит исходящие заголовки под режим пробы. Чистая функция — покрыта тестами.
 //
-//   strip-origin — снять Origin (боевой режим)
+//   jira-origin  — подменить Origin на адрес самой Jira (боевой режим)
 //   keep-origin  — оставить Origin как есть: с ним Firefox и получал отказ
-//   jira-origin  — подменить Origin на адрес самой Jira: проверка увидит совпадение
-//   bare         — снять Origin и все Sec-Fetch-*: запрос ближе всего к curl
+//   strip-origin — снять Origin: измерено, что от отказа это не спасает
+//   bare         — снять Origin и все Sec-Fetch-*
 //
 // Метка режима снимается всегда, свой Referer — тоже: он такой же moz-extension://.
 function applyHeaderMode(requestHeaders, mode, selfPrefix, jiraOrigin) {
@@ -231,33 +237,31 @@ function jiraErrorFromResponse(r) {
 // Пробы 1-4 отвечают на вопрос «доходит ли запись до Jira»: 404 в пробе 3 значит, что
 // PUT дошёл и дело в правах или поле; 403 значит, что режут раньше.
 //
-// Пробы 5-8 разделяют оставшиеся объяснения 403, меняя ровно по одному условию
-// относительно пробы 3. Сравнивать надо именно с ней:
+// Пробы 5-9 меняют ровно по одному условию относительно пробы 3 и остаются в наборе
+// как охрана от возврата: если Jira перенастроят, будет видно, какое именно условие
+// поменялось, а не общее «опять не работает».
 //
-//   5 — Origin возвращён на место. Если 5 и 3 отвечают одинаково, Origin ни при чём
-//       окончательно; если по-разному — снятие всё же влияет.
-//   6 — Origin подменён на адрес самой Jira. Проверка происхождения в Atlassian бывает
-//       строгой: пустой Origin ей не годится, нужен совпадающий.
-//   7 — значение заголовка nocheck вместо no-check. Написание различается между
-//       продуктами и версиями Atlassian, а фильтр сверяет значение целиком.
-//   8 — заголовка X-Atlassian-Token нет вовсе. Если 8 отвечает так же, как 3, значит
-//       заголовок на этом инстансе не разбирают, и причина не в XSRF-токене.
+//   5 — Origin оставлен как есть (Firefox: moz-extension://…). Измерено: 403.
+//   6 — Origin снят совсем. Измерено: 403 — снятия недостаточно.
+//   7 — значение заголовка nocheck вместо no-check. Измерено: без разницы.
+//   8 — заголовка X-Atlassian-Token нет вовсе. Измерено: без разницы.
+//   9 — без Origin и без Sec-Fetch-*. Измерено: 403 — дело не в Sec-Fetch-*.
 //
-// Пробы 5 и 6 правят заголовки через webRequest и работают только в Firefox; в Chrome
-// они помечаются как невыполнимые, а не молча искажают картину.
+// Пробы с правкой заголовков работают только в Firefox; в Chrome они помечаются
+// невыполненными, а не молча искажают картину.
 const PUT_PROBE = { method: 'PUT', path: '/rest/api/2/issue/ZZZZ-99999', payload: { fields: {} } };
 
 const DIAGNOSE_PROBES = [
     { step: 1, method: 'GET', path: '/rest/api/2/myself', payload: null, note: 'базовая проверка токена' },
     { step: 2, method: 'GET', path: '/rest/api/2/field', payload: null, note: 'чтение справочника полей' },
-    { ...PUT_PROBE, step: 3, note: 'боевые условия отправки оценки' },
+    { ...PUT_PROBE, step: 3, note: 'боевые условия отправки оценки (Origin = адрес Jira)' },
     {
         step: 4, method: 'POST', path: '/rest/api/2/search',
         payload: { jql: 'issuekey = ZZZZ-99999', maxResults: 0 },
         note: 'то же для метода POST',
     },
     { ...PUT_PROBE, step: 5, note: 'Origin оставлен как есть', mode: 'keep-origin', firefoxOnly: true },
-    { ...PUT_PROBE, step: 6, note: 'Origin подменён на адрес Jira', mode: 'jira-origin', firefoxOnly: true },
+    { ...PUT_PROBE, step: 6, note: 'Origin снят совсем', mode: 'strip-origin', firefoxOnly: true },
     { ...PUT_PROBE, step: 7, note: 'X-Atlassian-Token: nocheck', token: 'nocheck' },
     { ...PUT_PROBE, step: 8, note: 'без заголовка X-Atlassian-Token', token: null },
     { ...PUT_PROBE, step: 9, note: 'без Origin и без Sec-Fetch-*', mode: 'bare', firefoxOnly: true },
