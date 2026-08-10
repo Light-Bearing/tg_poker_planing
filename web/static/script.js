@@ -725,7 +725,6 @@ async function jiraLoadIssues() {
     const jql = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC';
     const { jiraUrl, jiraToken } = jiraSettings;
 
-    console.log('[Jira] jiraEpicLinkField:', jiraEpicLinkField || '(not set)');
 
     // Пробуем получить имя эпика сразу через специальные поля
     let additionalFields = 'summary,description,issuetype,priority,project,issuelinks';
@@ -736,7 +735,6 @@ async function jiraLoadIssues() {
     }
 
     console.log('[Jira] JQL filter used:', jql);
-    console.log('[Jira] Additional fields:', additionalFields);
 
     const resp = await jiraSendMessage({
         type: 'searchIssues',
@@ -776,7 +774,6 @@ async function jiraLoadIssues() {
             }
         }
     }
-    console.log('[Jira] Unique epic keys:', Array.from(epicKeys));
 
     // Запрашиваем ВСЕ эпики ОДИН РАЗ через key in (...)
     epicMap = {};
@@ -785,7 +782,6 @@ async function jiraLoadIssues() {
     if (epicKeysList.length > 0) {
         // Формируем JQL: key in ("E077-6863", "E077-1234", ...)
         const epicJql = `key in (${epicKeysList.map(k => `"${k}"`).join(', ')})`;
-        console.log('[Jira] Fetching all epics in ONE request:', epicJql);
         
         const epicResp = await jiraSendMessage({
             type: 'searchIssues',
@@ -800,7 +796,6 @@ async function jiraLoadIssues() {
             for (const epic of epicResp.issues) {
                 const summary = epic.fields?.summary || epic.key;
                 epicMap[epic.key] = summary;
-                console.log('[Jira] Epic', epic.key, '->', summary);
             }
         }
         
@@ -808,42 +803,11 @@ async function jiraLoadIssues() {
         for (const epicKey of epicKeysList) {
             if (!epicMap[epicKey]) {
                 epicMap[epicKey] = epicKey;
-                console.log('[Jira] Epic NOT FOUND, using key:', epicKey);
             }
         }
     }
-    console.log('[Jira] Final epicMap:', epicMap);
 
     let epicIssues = [];
-
-    if (resp.ok && resp.issues && resp.issues.length > 0) {
-        // Выводим структуру первой задачи для отладки
-        console.log('[Jira] FIRST ISSUE FULL STRUCTURE:');
-        console.log(JSON.stringify(resp.issues[0], null, 2));
-        
-        // Показываем конкретные поля
-        const firstIssue = resp.issues[0];
-        console.log('[Jira] Issue key:', firstIssue.key);
-        console.log('[Jira] Issue summary:', firstIssue.fields?.summary);
-        console.log('[Jira] Issue fields keys:', Object.keys(firstIssue.fields || {}));
-        
-        if (jiraEpicLinkField) {
-            console.log('[Jira] Epic Link field ID:', jiraEpicLinkField);
-            console.log('[Jira] Epic Link value:', firstIssue.fields?.[jiraEpicLinkField]);
-            console.log('[Jira] epic-name value:', firstIssue.fields?.['epic-name']);
-        }
-        
-        // Показываем все задачи с их epic-name
-        console.log('[Jira] All issues with epic info:');
-        resp.issues.forEach(issue => {
-            console.log(`  ${issue.key}:`, {
-                summary: issue.fields?.summary,
-                epicLink: issue.fields?.[jiraEpicLinkField],
-                epicName: issue.fields?.['epic-name'],
-                type: issue.fields?.issuetype?.name
-            });
-        });
-    }
 
     btn.disabled = false;
     btn.textContent = '🔄 ЗАГРУЗИТЬ ЗАДАЧИ';
