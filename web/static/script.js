@@ -129,6 +129,7 @@ let jiraSelectedIssue = null;
 let jiraEpicLinkField = '';   // customfield_ID для связи с эпиком
 let jiraConnected = false;     // флаг успешного подключения к Jira
 let jiraAutoConnecting = false;// идёт автоподключение
+let jiraAccessError = '';      // расширение не обслуживает адрес этой страницы
 let epicMap = {};             // маппинг ключ эпика -> имя эпика
 let currentJiraIssue = null;  // текущая задача из Jira {key, summary, description, url}
 let currentTaskText = '';     // текущий текст задачи (для не-Jira задач)
@@ -188,7 +189,20 @@ function jiraSendMessage(msg) {
                 error: 'Расширение или Jira не ответили за 20 с. Проверьте, что расширение включено, и попробуйте ещё раз.',
             });
         }, JIRA_EXT_TIMEOUT);
-        _jiraPending.set(msgId, { resolve, timer });
+        _jiraPending.set(msgId, {
+            // Расширение обслуживает только адреса, которые владелец разрешил в его popup.
+            // Показываем адрес этой страницы: его и надо туда вставить.
+            resolve: (response) => {
+                if (response && response.error === 'ORIGIN_NOT_ALLOWED') {
+                    jiraAccessError = `Расширение не обслуживает этот адрес. Откройте popup расширения и добавьте ${window.location.origin} в «Адреса Planning Poker».`;
+                    resolve({ ...response, blocked: true, error: jiraAccessError });
+                    return;
+                }
+                jiraAccessError = '';
+                resolve(response);
+            },
+            timer,
+        });
         // postMessage использует structured clone — надёжно работает в Chrome и Firefox
         window.postMessage({
             source: 'pp-jira-page',
@@ -230,7 +244,11 @@ function renderJiraPanel() {
 
         // Показываем актуальный статус подключения
         const statusEl = document.getElementById('jiraStatus');
-        if (jiraConnected) {
+        if (jiraAccessError) {
+            // Без этого расширение выглядит установленным, но молча ничего не делает
+            statusEl.className = 'jira-status err';
+            statusEl.textContent = jiraAccessError;
+        } else if (jiraConnected) {
             if (!statusEl.textContent.includes('Подключено')) {
                 statusEl.className = 'jira-status ok';
                 statusEl.textContent = '✅ Подключено';
