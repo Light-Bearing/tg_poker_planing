@@ -23,6 +23,21 @@ function detectBrowser() {
   return browserType;
 }
 
+// Показать номер версии в заголовке.
+// Нужен, чтобы отличить свежую сборку от старой, оставшейся в браузере:
+// временное расширение Firefox переустанавливают вручную, и легко загрузить
+// прошлую распакованную папку, не заметив этого.
+function showVersion() {
+  const el = document.getElementById('extVersion');
+  if (!el) return;
+  const runtime = (typeof browser !== 'undefined' && browser.runtime) ? browser.runtime : chrome.runtime;
+  try {
+    el.textContent = `v${runtime.getManifest().version}`;
+  } catch (e) {
+    el.textContent = '';
+  }
+}
+
 // Показать инструкцию для браузера
 function showBrowserInstruction() {
   const noteEl = document.getElementById('browserNote');
@@ -260,7 +275,8 @@ async function runDiagnose() {
     return;
   }
 
-  const lines = [`Jira: ${jiraUrl}`, ''];
+  const version = document.getElementById('extVersion').textContent || 'версия неизвестна';
+  const lines = [`Расширение: ${version}`, `Jira: ${jiraUrl}`, ''];
   resp.results.forEach((r) => {
     const path = r.url.startsWith(jiraUrl) ? r.url.slice(jiraUrl.length) : r.url;
     const code = r.status === 0 ? 'нет ответа' : `HTTP ${r.status}`;
@@ -292,6 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Определить браузер и показать инструкцию
   browserType = detectBrowser();
   showBrowserInstruction();
+  showVersion();
   
   // Загрузить сохраненные настройки
   loadSettings();

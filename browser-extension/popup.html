@@ -22,6 +22,12 @@
       margin-bottom: 12px;
       color: #333;
     }
+    /* Номер версии в заголовке: по нему видно, какая сборка реально загружена */
+    .ext-version {
+      font-size: 11px;
+      font-weight: normal;
+      color: #888;
+    }
     .section {
       background: white;
       padding: 12px;
@@ -130,7 +136,7 @@
   </style>
 </head>
 <body>
-  <h1>🔗 PP Jira Bridge</h1>
+  <h1>🔗 PP Jira Bridge <span id="extVersion" class="ext-version"></span></h1>
 
   <!-- Инфо о браузере -->
   <div id="browserNote" class="browser-note hidden"></div>

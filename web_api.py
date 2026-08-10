@@ -1,3 +1,4 @@
+import json
 import re
 import time
 import uuid
@@ -482,6 +483,21 @@ async def info(_):
     )
 
 
+# Архив расширения и инструкция обновляются вместе с сервером, а имя файла и адрес
+# не меняются. Без запрета кеширования браузер переиспользует прошлую загрузку,
+# и человек ставит старую сборку, будучи уверенным, что скачал свежую.
+NO_STORE = {"Cache-Control": "no-store, max-age=0"}
+
+
+def extension_version() -> str:
+    """Версия расширения из манифеста. Пустая строка, если прочитать не вышло."""
+    try:
+        with open("browser-extension/manifest.json", encoding="utf-8") as f:
+            return str(json.load(f).get("version", ""))
+    except (OSError, ValueError):
+        return ""
+
+
 async def download_extension(request: Request):
     from starlette.responses import FileResponse, HTMLResponse
 
@@ -506,7 +522,7 @@ async def download_extension(request: Request):
         try:
             with open(instruction_file, encoding="utf-8") as f:
                 content = f.read()
-            return HTMLResponse(content)
+            return HTMLResponse(content, headers=NO_STORE)
         except FileNotFoundError:
             return HTMLResponse("<h1>Файл инструкции не найден</h1>")
 
@@ -515,10 +531,18 @@ async def download_extension(request: Request):
 
     if "firefox" in user_agent:
         zip_path = "browser-extension/pp-jira-bridge-firefox.zip"
+        flavour = "firefox"
     elif "edg" in user_agent:
         zip_path = "browser-extension/pp-jira-bridge-chrome.zip"
+        flavour = "chrome"
     else:
         # Chrome, Chromium, Safari, Opera, etc.
         zip_path = "browser-extension/pp-jira-bridge-chrome.zip"
+        flavour = "chrome"
 
-    return FileResponse(zip_path, media_type="application/zip", filename="pp-jira-bridge.zip")
+    # Версия в имени файла: скачанные архивы копятся в папке загрузок, и без неё
+    # свежий отличается от прошлого только суффиксом «(1)» — распаковывают не тот.
+    version = extension_version()
+    filename = f"pp-jira-bridge-{flavour}-{version}.zip" if version else f"pp-jira-bridge-{flavour}.zip"
+
+    return FileResponse(zip_path, media_type="application/zip", filename=filename, headers=NO_STORE)
