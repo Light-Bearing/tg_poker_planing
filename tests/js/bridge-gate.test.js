@@ -55,11 +55,30 @@ test('разрешённый адрес получает настройки, п�
     await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
 
     const allowed = await ask({ type: 'getSettings' }, APP);
-    assert.strictEqual(allowed.jiraToken, 'SECRET-TOKEN-123');
+    assert.strictEqual(allowed.jiraUrl, 'https://jira.example.ru');
+    assert.strictEqual(allowed.configured, true);
 
     const blocked = await ask({ type: 'getSettings' }, EVIL);
     assert.strictEqual(blocked.error, 'ORIGIN_NOT_ALLOWED');
     assert.ok(!('jiraToken' in blocked));
+});
+
+test('токен не отдаётся никому — ни странице, ни popup', async () => {
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+    for (const sender of [APP, POPUP]) {
+        const resp = await ask({ type: 'getSettings' }, sender);
+        assert.ok(!('jiraToken' in resp), JSON.stringify(resp));
+        assert.ok(!JSON.stringify(resp).includes('SECRET-TOKEN-123'));
+    }
+});
+
+test('страница не может подменить адрес Jira и увести токен на чужой хост', async () => {
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+    await ask({ type: 'saveSettings', jiraUrl: 'https://evil.example', jiraToken: 'подменыш', jiraFilter: 'x' }, APP);
+    assert.strictEqual(store.jiraUrl, 'https://jira.example.ru');
+    assert.strictEqual(store.jiraToken, 'SECRET-TOKEN-123');
+    // Несекретное страница сохранить по-прежнему может
+    assert.strictEqual(store.jiraFilter, 'x');
 });
 
 test('посторонняя страница не может разрешить себя сама', async () => {
@@ -81,7 +100,43 @@ test('разрешённая страница не может дописать �
 
 test('popup работает всегда — у его сообщений нет вкладки', async () => {
     const resp = await ask({ type: 'getSettings' }, POPUP);
-    assert.strictEqual(resp.jiraToken, 'SECRET-TOKEN-123');
+    assert.strictEqual(resp.configured, true);
+    assert.ok(!('error' in resp));
+});
+
+test('учётные данные для запроса берутся из хранилища, а не из сообщения страницы', async () => {
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+
+    let captured = null;
+    global.fetch = async (url, init) => {
+        captured = { url, init };
+        return { ok: true, status: 200, json: async () => ({ issues: [] }) };
+    };
+
+    // Страница пытается увести запрос с токеном на свой хост
+    const resp = await ask({
+        type: 'searchIssues',
+        jiraUrl: 'https://evil.example',
+        jiraToken: 'подменыш',
+        jql: 'project = X',
+    }, APP);
+
+    assert.strictEqual(resp.ok, true);
+    assert.ok(captured.url.startsWith('https://jira.example.ru/'), captured.url);
+    assert.strictEqual(captured.init.headers['Authorization'], 'Bearer SECRET-TOKEN-123');
+});
+
+test('без настроек запрос не уходит, а объясняет, чего не хватает', async () => {
+    store.jiraToken = '';
+    await ask({ type: 'saveSettings', jiraUrl: 'https://jira.example.ru', jiraToken: '', allowedOrigins: 'https://planning.example.ru' }, POPUP);
+
+    let called = false;
+    global.fetch = async () => { called = true; return { ok: true, status: 200, json: async () => ({}) }; };
+
+    const resp = await ask({ type: 'searchIssues', jql: 'project = X' }, APP);
+    assert.strictEqual(resp.ok, false);
+    assert.match(resp.error, /не настроено/);
+    assert.strictEqual(called, false);
 });
 
 test('отказ называет адрес, который надо разрешить', async () => {
