@@ -9,9 +9,103 @@ const storage = api ? api.storage : null;
 
 // Хелпер для заголовков запросов к Jira.
 // X-Atlassian-Token: no-check — стандартная практика для Jira Server: для REST-запросов
-// с токеном заголовок безвреден, а при включённой XSRF-защите снимает отказ на PUT/POST.
+// с токеном заголовок безвреден и на части инстансов снимает отказ на PUT/POST.
+// Одного его мало: проверку происхождения в Jira он не отключает, см. снятие Origin ниже.
 function jiraAuth(token, extra = {}) {
     return { ...extra, 'Authorization': `Bearer ${token}`, 'X-Atlassian-Token': 'no-check' };
+}
+
+// --- Снятие заголовка Origin (только Firefox) ---
+//
+// Диагностика на живой Jira Server (project.samokat.ru) показала: GET проходят,
+// а PUT и POST возвращают 403 «XSRF check failed». Ответ пришёл от самой Jira, не от
+// прокси — в нём X-Seraph-LoginReason: OK и X-AUSERNAME, то есть аутентификация удалась.
+// Заголовок X-Atlassian-Token: no-check при этом отправлялся. В Chrome те же запросы
+// с теми же заголовками проходят.
+//
+// Различие между браузерами одно: к запросам расширения Firefox добавляет
+// Origin: moz-extension://<uuid>, а Chrome при host permissions не добавляет ничего.
+// Проверка происхождения в Jira срабатывает до разбора no-check, поэтому заголовок её
+// не снимает. Снимаем сам Origin — и только у запросов, порождённых этим расширением.
+//
+// Требует разрешений webRequest и webRequestBlocking; они добавлены только в
+// manifest-firefox.json. В Chrome api.webRequest отсутствует, и код становится пустышкой.
+
+// Пробел в конце шаблона неслучаен: точный префикс URL расширения, по которому
+// отличаем свои запросы от чужих. Возвращает null, если адрес не разбирается.
+function jiraOriginPattern(jiraUrl) {
+    try {
+        const u = new URL(jiraUrl);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        return `${u.protocol}//${u.host}/*`;
+    } catch (_) {
+        return null;
+    }
+}
+
+// Свой ли это запрос. Вкладки с самой Jira трогать нельзя: там работает обычная
+// сессия пользователя, и снятие Origin ослабило бы её защиту от подделки запросов.
+function isOwnRequest(details, selfPrefix) {
+    if (!selfPrefix) return false;
+    const origin = details.originUrl || details.documentUrl || '';
+    return typeof origin === 'string' && origin.startsWith(selfPrefix);
+}
+
+// Убирает Origin и наш собственный Referer вида moz-extension://…
+// Referer чужой (например, страницы Jira) не трогаем — он не наш.
+function withoutOriginHeaders(requestHeaders, selfPrefix) {
+    return (requestHeaders || []).filter(h => {
+        const name = String(h.name).toLowerCase();
+        if (name === 'origin') return false;
+        if (name === 'referer' && selfPrefix && String(h.value || '').startsWith(selfPrefix)) return false;
+        return true;
+    });
+}
+
+// Состояние для вывода в диагностике: понятно, снимается Origin или нет
+let originStripState = 'unsupported';
+let originStripListener = null;
+
+function supportsOriginStrip() {
+    return Boolean(
+        api && api.webRequest && api.webRequest.onBeforeSendHeaders &&
+        runtime && runtime.getManifest && runtime.getManifest().manifest_version === 2
+    );
+}
+
+// Перерегистрирует слушатель под текущий адрес Jira. Фильтр по адресу узкий
+// намеренно: блокирующий слушатель на <all_urls> замедлял бы весь браузер.
+function refreshOriginStrip(jiraUrl) {
+    if (!supportsOriginStrip()) {
+        originStripState = 'unsupported';
+        return;
+    }
+    if (originStripListener) {
+        api.webRequest.onBeforeSendHeaders.removeListener(originStripListener);
+        originStripListener = null;
+    }
+    originStripState = 'inactive';
+
+    const pattern = jiraOriginPattern(jiraUrl);
+    if (!pattern) return;
+
+    const selfPrefix = runtime.getURL('');
+    originStripListener = (details) => {
+        if (!isOwnRequest(details, selfPrefix)) return {};
+        return { requestHeaders: withoutOriginHeaders(details.requestHeaders, selfPrefix) };
+    };
+    try {
+        api.webRequest.onBeforeSendHeaders.addListener(
+            originStripListener,
+            { urls: [pattern] },
+            ['blocking', 'requestHeaders']
+        );
+        originStripState = 'active';
+    } catch (err) {
+        // Разрешения нет или шаблон не принят — работаем как раньше, но говорим об этом
+        originStripListener = null;
+        originStripState = `ошибка: ${String(err && err.message ? err.message : err)}`;
+    }
 }
 
 // Разбирает тело ошибочного ответа Jira в читаемое сообщение.
@@ -145,6 +239,8 @@ function friendlyError(err) {
 function handleMessage(message, sender, sendResponse) {
     // Сохранить настройки
     if (message.type === 'saveSettings') {
+        // Адрес Jira поменялся — слушатель Origin должен слушать новый хост
+        refreshOriginStrip(message.jiraUrl);
         storage.local.set({
             jiraUrl: message.jiraUrl,
             jiraToken: message.jiraToken,
@@ -212,8 +308,11 @@ function handleMessage(message, sender, sendResponse) {
     // Диагностика: четыре пробы, чтобы понять, где именно рвётся отправка оценки
     if (message.type === 'diagnose') {
         const { jiraUrl, jiraToken } = message;
+        // Пробы должны идти в тех же условиях, что и отправка оценки: адрес в поле мог
+        // отличаться от сохранённого, а слушатель Origin привязан к хосту.
+        refreshOriginStrip(jiraUrl);
         runDiagnostics(jiraUrl, jiraToken)
-            .then(results => sendResponse({ ok: true, results }))
+            .then(results => sendResponse({ ok: true, results, originStrip: originStripState }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
         return true;
     }
@@ -257,10 +356,20 @@ function handleMessage(message, sender, sendResponse) {
 
 if (runtime) {
     runtime.onMessage.addListener(handleMessage);
+    // При старте поднимаем слушатель под сохранённый адрес: отправка оценки идёт
+    // с сохранённых настроек, popup для неё открывать не обязательно.
+    if (storage) {
+        Promise.resolve(storage.local.get(['jiraUrl']))
+            .then(result => refreshOriginStrip(result && result.jiraUrl))
+            .catch(() => {});
+    }
     console.log('PP Jira Bridge background script loaded');
 }
 
 // Экспорт для юнит-тестов: в браузере module не определён, ветка не выполняется
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES };
+    module.exports = {
+        describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES,
+        jiraOriginPattern, isOwnRequest, withoutOriginHeaders,
+    };
 }
