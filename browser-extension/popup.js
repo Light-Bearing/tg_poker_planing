@@ -143,19 +143,14 @@ async function testConnection() {
 
   showStatus('connectionStatus', 'Проверка подключения...', 'success');
 
-  try {
-    const response = await fetch(`${jiraUrl}/rest/api/2/myself`, {
-      headers: jiraAuth(jiraToken)
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      showStatus('connectionStatus', `✅ Подключено как: ${data.displayName}`, 'success');
-    } else {
-      showStatus('connectionStatus', `❌ Ошибка: HTTP ${response.status}`, 'error');
-    }
-  } catch (err) {
-    showStatus('connectionStatus', `❌ Ошибка: ${err.message}`, 'error');
+  // Запрос идёт через background, а не отсюда напрямую: там собраны заголовки,
+  // credentials: 'omit', подмена Origin и разбор тела ошибки. Свои fetch в popup
+  // жили без всего этого и показывали «HTTP 403» вместо причины отказа.
+  const resp = await browser.runtime.sendMessage({ type: 'testConnection', jiraUrl, jiraToken });
+  if (resp && resp.ok) {
+    showStatus('connectionStatus', `✅ Подключено как: ${resp.displayName}`, 'success');
+  } else {
+    showStatus('connectionStatus', `❌ Ошибка: ${(resp && resp.error) || 'нет ответа'}`, 'error');
   }
 }
 
@@ -174,16 +169,13 @@ async function loadFields() {
   fieldsListEl.classList.remove('hidden');
 
   try {
-    const response = await fetch(`${jiraUrl}/rest/api/2/field`, {
-      headers: jiraAuth(jiraToken)
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    const resp = await browser.runtime.sendMessage({ type: 'getFields', jiraUrl, jiraToken });
+    if (!resp || !resp.ok) {
+      throw new Error((resp && resp.error) || 'нет ответа');
     }
 
-    const fields = await response.json();
-    
+    const fields = resp.fields || [];
+
     // Сортируем: сначала кастомные поля (customfield_), потом стандартные
     const sortedFields = fields.sort((a, b) => {
       const aCustom = a.id.startsWith('customfield_') ? 0 : 1;
@@ -222,10 +214,6 @@ async function loadFields() {
     fieldsListEl.innerHTML = `Ошибка: ${err.message}`;
     showStatus('connectionStatus', `Ошибка загрузки полей: ${err.message}`, 'error');
   }
-}
-
-function jiraAuth(token, extra = {}) {
-    return { ...extra, 'Authorization': `Bearer ${token}` };
 }
 
 // Ответила ли Jira: у неё тело всегда JSON. HTML-страница — это прокси перед ней

@@ -476,7 +476,10 @@ function handleTrustedMessage(message, sendResponse, fromPopup) {
             headers: jiraAuth(jiraToken),
             credentials: 'omit',
         })
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok) return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
+                return r.json();
+            })
             .then(data => sendResponse({ ok: true, fields: data }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
         return true;
@@ -490,13 +493,16 @@ function handleTrustedMessage(message, sendResponse, fromPopup) {
             `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
             { headers: jiraAuth(jiraToken), credentials: 'omit' }
         )
-            .then(r => r.json())
+            .then(r => {
+                if (!r.ok) return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
+                return r.json();
+            })
             .then(data => sendResponse({ ok: true, issues: data.issues || [] }))
             .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
         return true;
     }
 
-    // Диагностика: четыре пробы, чтобы понять, где именно рвётся отправка оценки
+    // Диагностика: пробы, чтобы понять, где именно рвётся отправка оценки
     if (message.type === 'diagnose') {
         const { jiraUrl, jiraToken } = message;
         // Пробы должны идти в тех же условиях, что и отправка оценки: адрес в поле мог
