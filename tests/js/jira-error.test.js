@@ -133,12 +133,17 @@ test('ни одна проба диагностики не может ничег
     }
 });
 
-test('r.json() на ошибочном ответе не вызывается — в коде остались только r.text()', () => {
-    // Регресс-охрана: именно вызов r.json() на ошибке прятал код ответа за SyntaxError
+test('запросы к Jira идут через один хелпер — разойтись копиям больше негде', () => {
+    // Регресс-охрана. Раньше каждая ручка собирала запрос сама, копии разошлись, и часть
+    // из них звала json() на ошибочном ответе — код ответа прятался за SyntaxError.
     const fs = require('node:fs');
     const src = fs.readFileSync(require.resolve('../../browser-extension/background.js'), 'utf8');
     const code = src.split('\n').filter(line => !line.trim().startsWith('//')).join('\n');
-    const jsonCalls = code.match(/r\.json\(\)/g) || [];
-    // Допустимы только успешные ветки: testConnection, getFields, searchIssues
-    assert.strictEqual(jsonCalls.length, 3, `неожиданное число вызовов r.json(): ${jsonCalls.length}`);
+
+    // fetch к Jira ровно один — внутри jiraFetch; второй только в пробах диагностики
+    const fetches = code.match(/\bfetch\(/g) || [];
+    assert.strictEqual(fetches.length, 2, `неожиданное число вызовов fetch: ${fetches.length}`);
+
+    // Тело разбирается только после проверки response.ok внутри jiraFetch
+    assert.ok(/if \(!response\.ok\) throw new Error\(await jiraErrorFromResponse\(response\)\);/.test(code));
 });

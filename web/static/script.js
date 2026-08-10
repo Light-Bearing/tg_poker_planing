@@ -122,7 +122,18 @@ const confirmDialog = new ConfirmManager();
 // ========================================================================
 
 // ==================== JIRA STATE ====================
+// Настройки Jira, доступные странице. Токена среди них нет и быть не может: он живёт
+// только в хранилище расширения, а запросы к Jira собирает background. Страница видит
+// адрес Jira (нужен для ссылок на задачи), фильтр, идентификаторы полей и признак того,
+// что расширение настроено.
 let jiraSettings = JSON.parse(localStorage.getItem('pp_jira_settings') || '{}');
+
+// Разовая чистка: прежние версии клали токен в localStorage, откуда его достала бы
+// любая XSS на странице. Удаляем при первом же запуске новой версии.
+if (jiraSettings.jiraToken) {
+    delete jiraSettings.jiraToken;
+    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+}
 let jiraIssues = [];          // все задачи (включая эпики)
 let jiraEpics = [];           // только эпики (для совместимости)
 let jiraSelectedIssue = null;
@@ -238,9 +249,14 @@ function renderJiraPanel() {
     sessionSection.style.display = 'none';
 
     if (hasJiraExt()) {
-        document.getElementById('jiraUrl').value = jiraSettings.jiraUrl || '';
-        document.getElementById('jiraToken').value = jiraSettings.jiraToken || '';
         document.getElementById('jiraFilter').value = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC, updated DESC';
+
+        const urlEl = document.getElementById('jiraConfiguredUrl');
+        if (urlEl) {
+            urlEl.textContent = jiraSettings.configured
+                ? `Настроено: ${jiraSettings.jiraUrl}`
+                : 'Пока не настроено.';
+        }
 
         // Показываем актуальный статус подключения
         const statusEl = document.getElementById('jiraStatus');
@@ -256,7 +272,7 @@ function renderJiraPanel() {
         } else if (jiraAutoConnecting) {
             statusEl.className = 'jira-status';
             statusEl.textContent = '⏳ Подключение...';
-        } else if (jiraSettings.jiraUrl && jiraSettings.jiraToken) {
+        } else if (jiraSettings.configured) {
             statusEl.className = 'jira-status';
             statusEl.textContent = '💡 Нажмите ПРОВЕРИТЬ';
         } else {
@@ -297,27 +313,20 @@ function renderJiraPanel() {
 }
 
 async function jiraTestConnection() {
-    const url = document.getElementById('jiraUrl').value.trim();
-    const token = document.getElementById('jiraToken').value.trim();
     const statusEl = document.getElementById('jiraStatus');
-
-    if (!url || !token) {
-        statusEl.className = 'jira-status err';
-        statusEl.textContent = 'Заполните URL и токен';
-        return;
-    }
 
     const btn = document.getElementById('jiraTestBtn');
     btn.disabled = true;
     btn.textContent = '...';
     statusEl.className = 'jira-status';
 
-    const resp = await jiraSendMessage({ type: 'testConnection', jiraUrl: url, jiraToken: token });
+    // Адрес и токен берёт background из своего хранилища — страница их не знает
+    const resp = await jiraSendMessage({ type: 'testConnection' });
     if (resp.ok) {
         jiraConnected = true;
         statusEl.className = 'jira-status ok';
         statusEl.textContent = `✅ Подключено: ${resp.displayName}`;
-        const fieldsResp = await jiraSendMessage({ type: 'getFields', jiraUrl: url, jiraToken: token });
+        const fieldsResp = await jiraSendMessage({ type: 'getFields' });
         if (fieldsResp.ok) {
             jiraPopulateFieldSelect(fieldsResp.fields);
             // Ищем поле Epic Link по нескольким критериям
@@ -384,21 +393,26 @@ function showJiraFieldSelect() {
 }
 
 async function jiraSaveSettings() {
-    const url = document.getElementById('jiraUrl').value.trim();
-    const token = document.getElementById('jiraToken').value.trim();
     const filter = document.getElementById('jiraFilter').value.trim();
     const fieldSelect = document.getElementById('jiraFieldSelect');
     const fieldId = fieldSelect.value || '';
 
-    if (!url || !token) {
-        toast.warning('Заполните URL и токен');
+    if (!jiraSettings.configured) {
+        toast.warning('Сначала укажите адрес Jira и токен в popup расширения');
         return;
     }
 
-    jiraSettings = { jiraUrl: url, jiraToken: token, jiraFilter: filter, storyPointsField: fieldId, epicLinkField: jiraEpicLinkField };
+    // Страница сохраняет только несекретное: фильтр и выбранные поля.
+    // Адрес и токен живут в расширении, отсюда они не отправляются и не приходят.
+    jiraSettings = { ...jiraSettings, jiraFilter: filter, storyPointsField: fieldId, epicLinkField: jiraEpicLinkField };
     localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
 
-    const resp = await jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
+    const resp = await jiraSendMessage({
+        type: 'saveSettings',
+        jiraFilter: filter,
+        storyPointsField: fieldId,
+        epicLinkField: jiraEpicLinkField,
+    });
     if (resp.ok) {
         toast.success('Настройки Jira сохранены');
     } else if (resp.error === 'EXTENSION_NOT_FOUND') {
@@ -413,7 +427,7 @@ async function jiraSaveSettings() {
 function updateJiraHeaderBtn() {
     const btn = document.getElementById('jiraBtn');
     if (!btn) return;
-    if (jiraSettings.jiraUrl && jiraSettings.jiraToken) {
+    if (jiraSettings.configured) {
         btn.classList.add('has-settings');
     } else {
         btn.classList.remove('has-settings');
@@ -424,7 +438,7 @@ function updateJiraHeaderBtn() {
 async function jiraAutoConnect() {
     if (jiraAutoConnecting || jiraConnected) return;
     if (!hasJiraExt()) return;
-    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) return;
+    if (!jiraSettings.configured) return;
 
     jiraAutoConnecting = true;
     console.log('Jira: auto-connecting...');
@@ -447,8 +461,6 @@ async function jiraAutoConnect() {
         // Тихий тест подключения (без UI-фидбека)
         const resp = await jiraSendMessage({
             type: 'testConnection',
-            jiraUrl: jiraSettings.jiraUrl,
-            jiraToken: jiraSettings.jiraToken
         });
 
         if (resp.ok) {
@@ -466,8 +478,6 @@ async function jiraAutoConnect() {
             if (!jiraSettings.storyPointsField || !jiraEpicLinkField) {
                 const fieldsResp = await jiraSendMessage({
                     type: 'getFields',
-                    jiraUrl: jiraSettings.jiraUrl,
-                    jiraToken: jiraSettings.jiraToken
                 });
                 if (fieldsResp.ok) {
                     // Заполняем селект полей (чтобы при открытии панели не был пустым)
@@ -501,8 +511,6 @@ async function jiraAutoConnect() {
                         // Селект пуст — подгрузим поля из Jira
                         const fieldsResp = await jiraSendMessage({
                             type: 'getFields',
-                            jiraUrl: jiraSettings.jiraUrl,
-                            jiraToken: jiraSettings.jiraToken
                         });
                         if (fieldsResp.ok) {
                             jiraPopulateFieldSelect(fieldsResp.fields);
@@ -710,7 +718,7 @@ function selectJoinJiraIssue(el, key) {
 
 // ==================== JIRA ISSUES (внутри сессии) ====================
 async function jiraLoadIssues() {
-    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) {
+    if (!jiraSettings.configured) {
         toast.warning('Сначала настройте Jira в ⚡ JIRA');
         return;
     }
@@ -723,8 +731,6 @@ async function jiraLoadIssues() {
     statusEl.textContent = '';
 
     const jql = jiraSettings.jiraFilter || 'assignee = currentUser() AND resolution = Unresolved ORDER BY priority DESC';
-    const { jiraUrl, jiraToken } = jiraSettings;
-
 
     // Пробуем получить имя эпика сразу через специальные поля
     let additionalFields = 'summary,description,issuetype,priority,project,issuelinks';
@@ -738,8 +744,6 @@ async function jiraLoadIssues() {
 
     const resp = await jiraSendMessage({
         type: 'searchIssues',
-        jiraUrl,
-        jiraToken,
         jql,
         maxResults: 50,
         fields: additionalFields,
@@ -785,8 +789,6 @@ async function jiraLoadIssues() {
         
         const epicResp = await jiraSendMessage({
             type: 'searchIssues',
-            jiraUrl,
-            jiraToken,
             jql: epicJql,
             maxResults: 100,
             fields: 'summary,issuetype'
@@ -1077,7 +1079,7 @@ function updateTaskDescriptionWithJira(description, linked = []) {
 }
 
 async function jiraSendEstimate() {
-    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken || !jiraSettings.storyPointsField) {
+    if (!jiraSettings.configured || !jiraSettings.storyPointsField) {
         toast.warning('Сначала настройте Jira в ⚡ JIRA');
         toggleJiraPanel();
         return;
@@ -1099,8 +1101,6 @@ async function jiraSendEstimate() {
 
     const resp = await jiraSendMessage({
         type: 'setEstimate',
-        jiraUrl: jiraSettings.jiraUrl,
-        jiraToken: jiraSettings.jiraToken,
         issueKey: issueKey,
         fieldId: jiraSettings.storyPointsField,
         value,
@@ -1864,7 +1864,7 @@ function updateTaskDisplay() {
 }
 
 async function loadJiraIssueDescription(issueKey) {
-    if (!jiraSettings.jiraUrl || !jiraSettings.jiraToken) return;
+    if (!jiraSettings.configured) return;
     
     // Проверяем, есть ли уже описание в кэше задач
     const cachedIssue = jiraIssues.find(i => i.key === issueKey);
@@ -1878,8 +1878,6 @@ async function loadJiraIssueDescription(issueKey) {
     try {
         const resp = await jiraSendMessage({
             type: 'searchIssues',
-            jiraUrl: jiraSettings.jiraUrl,
-            jiraToken: jiraSettings.jiraToken,
             jql: `key = "${issueKey}"`,
             maxResults: 1,
             fields: 'description'
@@ -1948,9 +1946,10 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('PP Jira Bridge extension detected');
         jiraSendMessage({ type: 'getSettings' }).then((extSettings) => {
             if (extSettings && extSettings.jiraUrl) {
-                // Мержим: расширение -> приоритет для URL/token/filter,
+                // Мержим: расширение -> приоритет для адреса и фильтра,
                 // localStorage -> приоритет для полей (storyPointsField, epicLinkField),
-                // т.к. автообнаружение могло их сохранить локално, но не в расширение
+                // т.к. автообнаружение могло их сохранить локально, но не в расширение.
+                // Токена в extSettings нет: расширение его не отдаёт.
                 const localSettings = { ...jiraSettings };
                 jiraSettings = {
                     ...extSettings,
@@ -2507,8 +2506,8 @@ function updateSessionDisplay(session) {
         // Кнопка Jira — только для инициатора и если есть задача из Jira
         const jiraSendBtn = document.getElementById('jiraSendBtn');
         const canSendToJira = state.isInitiator && isJiraTask && (
-            (hasJiraExt() && jiraSettings.jiraUrl && jiraSettings.jiraToken) ||
-            (currentJiraIssue.jiraUrl && jiraSettings.jiraToken)
+            (hasJiraExt() && jiraSettings.configured) ||
+            (currentJiraIssue.jiraUrl && jiraSettings.configured)
         );
         if (canSendToJira) {
             jiraSendBtn.style.display = 'inline-flex';

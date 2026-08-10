@@ -421,137 +421,132 @@ function handleMessage(message, sender, sendResponse) {
     return handleTrustedMessage(message, sendResponse, true);
 }
 
-// fromPopup — сообщение пришло из интерфейса самого расширения. Только оно вправе
-// менять список разрешённых адресов: иначе разрешённая однажды страница смогла бы
-// дописать в него соседей, и одной XSS на ней хватило бы, чтобы открыть мост кому угодно.
+// fromPopup — сообщение пришло из интерфейса самого расширения. Права у него шире:
+// только popup вправе менять список разрешённых адресов и задавать адрес Jira с токеном.
+// Страница не может ни того, ни другого — иначе одной XSS на разрешённой странице
+// хватило бы, чтобы открыть мост кому угодно или увести токен на чужой хост.
 function handleTrustedMessage(message, sendResponse, fromPopup) {
-    // Сохранить настройки
-    if (message.type === 'saveSettings') {
-        // Адрес Jira поменялся — слушатель Origin должен слушать новый хост
-        refreshOriginStrip(message.jiraUrl);
+    const handler = HANDLERS[message.type];
+    if (!handler) return false;
+    Promise.resolve(handler(message, fromPopup))
+        .then(sendResponse)
+        .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
+    return true;
+}
+
+// Учётные данные для запроса. Страница их не присылает и прислать не может: берём
+// только из хранилища. popup вправе передать свои — он проверяет ещё не сохранённые.
+async function resolveCredentials(message, fromPopup) {
+    if (fromPopup && message.jiraUrl && message.jiraToken) {
+        return { jiraUrl: message.jiraUrl, jiraToken: message.jiraToken };
+    }
+    const stored = await storageGet(['jiraUrl', 'jiraToken']);
+    if (!stored || !stored.jiraUrl || !stored.jiraToken) {
+        throw new Error('Расширение не настроено: укажите адрес Jira и токен в его popup.');
+    }
+    return { jiraUrl: stored.jiraUrl, jiraToken: stored.jiraToken };
+}
+
+// Один запрос к Jira. Здесь собрано всё, что должно быть одинаковым у всех вызовов:
+// заголовки, отказ от кук и разбор тела ошибки. Раньше это было скопировано в каждую
+// ветку обработчика, и копии разошлись — часть звала r.json() на ошибочном ответе.
+//
+// credentials: 'omit' — аутентифицируемся Bearer-токеном и на сессионные куки не
+// полагаемся. Если браузер приложит куку сессии Jira, Jira Server может предпочесть
+// сессию токену и включить XSRF-защиту на изменяющих запросах.
+async function jiraFetch(creds, path, { method = 'GET', body = null } = {}) {
+    const extra = body ? { 'Content-Type': 'application/json' } : {};
+    const response = await fetch(`${creds.jiraUrl}${path}`, {
+        method,
+        headers: jiraAuth(creds.jiraToken, extra),
+        credentials: 'omit',
+        ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!response.ok) throw new Error(await jiraErrorFromResponse(response));
+    // 204 у PUT и пустое тело у части ручек: разбирать нечего
+    if (response.status === 204) return null;
+    return response.json().catch(() => null);
+}
+
+const HANDLERS = {
+    async saveSettings(message, fromPopup) {
         const settings = {
-            jiraUrl: message.jiraUrl,
-            jiraToken: message.jiraToken,
             jiraFilter: message.jiraFilter,
             storyPointsField: message.storyPointsField,
             epicLinkField: message.epicLinkField || '',
         };
-        if (fromPopup && 'allowedOrigins' in message) {
-            settings.allowedOrigins = parseAllowedOrigins(message.allowedOrigins);
+        // Адрес Jira, токен и список разрешённых адресов принимаются только из popup
+        if (fromPopup) {
+            settings.jiraUrl = message.jiraUrl;
+            settings.jiraToken = message.jiraToken;
+            if ('allowedOrigins' in message) {
+                settings.allowedOrigins = parseAllowedOrigins(message.allowedOrigins);
+            }
+            // Хост Jira мог смениться — слушатель заголовков должен слушать новый
+            refreshOriginStrip(message.jiraUrl);
         }
-        Promise.resolve(storage.local.set(settings)).then(() => sendResponse({ ok: true }));
-        return true;
-    }
+        await storage.local.set(settings);
+        return { ok: true };
+    },
 
-    // Получить настройки
-    if (message.type === 'getSettings') {
-        storageGet(['jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField', 'allowedOrigins'])
-            .then(result => sendResponse(result));
-        return true;
-    }
+    async getSettings() {
+        const stored = await storageGet([
+            'jiraUrl', 'jiraToken', 'jiraFilter', 'storyPointsField', 'epicLinkField', 'allowedOrigins',
+        ]);
+        // Токен наружу не отдаём никогда — ни странице, ни popup: popup читает хранилище
+        // сам. Вместо него признак настроенности, по которому страница решает, что рисовать.
+        const { jiraToken, ...safe } = stored || {};
+        return { ...safe, configured: Boolean(stored && stored.jiraUrl && jiraToken) };
+    },
 
-    // Проверить подключение к Jira
-    if (message.type === 'testConnection') {
-        const { jiraUrl, jiraToken } = message;
-        // credentials: 'omit' — аутентифицируемся Bearer-токеном и на сессионные куки
-        // не полагаемся. Если браузер приложит куку сессии Jira, Jira Server может
-        // предпочесть сессию токену и включить XSRF-защиту на изменяющих запросах.
-        fetch(`${jiraUrl}/rest/api/2/myself`, {
-            headers: jiraAuth(jiraToken),
-            credentials: 'omit',
-        })
-            .then(r => {
-                if (r.ok) return r.json();
-                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
-            })
-            .then(data => sendResponse({ ok: true, displayName: data.displayName }))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
+    async testConnection(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        const data = await jiraFetch(creds, '/rest/api/2/myself');
+        return { ok: true, displayName: data && data.displayName };
+    },
 
-    // Получить список полей (чтобы найти Story Points)
-    if (message.type === 'getFields') {
-        const { jiraUrl, jiraToken } = message;
-        fetch(`${jiraUrl}/rest/api/2/field`, {
-            headers: jiraAuth(jiraToken),
-            credentials: 'omit',
-        })
-            .then(r => {
-                if (!r.ok) return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
-                return r.json();
-            })
-            .then(data => sendResponse({ ok: true, fields: data }))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
+    async getFields(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        return { ok: true, fields: await jiraFetch(creds, '/rest/api/2/field') };
+    },
 
-    // Поиск задач по JQL
-    if (message.type === 'searchIssues') {
-        const { jiraUrl, jiraToken, jql, maxResults = 50, fields = 'summary,description' } = message;
+    async searchIssues(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        const { jql, maxResults = 50, fields = 'summary,description' } = message;
         const fieldsParam = fields.split(',').map(f => f.trim()).filter(Boolean).join(',');
-        fetch(
-            `${jiraUrl}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`,
-            { headers: jiraAuth(jiraToken), credentials: 'omit' }
-        )
-            .then(r => {
-                if (!r.ok) return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
-                return r.json();
-            })
-            .then(data => sendResponse({ ok: true, issues: data.issues || [] }))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
+        const query = `jql=${encodeURIComponent(jql)}&maxResults=${maxResults}&fields=${encodeURIComponent(fieldsParam)}`;
+        const data = await jiraFetch(creds, `/rest/api/2/search?${query}`);
+        return { ok: true, issues: (data && data.issues) || [] };
+    },
 
-    // Диагностика: пробы, чтобы понять, где именно рвётся отправка оценки
-    if (message.type === 'diagnose') {
-        const { jiraUrl, jiraToken } = message;
-        // Пробы должны идти в тех же условиях, что и отправка оценки: адрес в поле мог
-        // отличаться от сохранённого, а слушатель Origin привязан к хосту.
-        refreshOriginStrip(jiraUrl);
-        runDiagnostics(jiraUrl, jiraToken)
-            .then(results => sendResponse({
-                ok: true, results, originStrip: originStripState, headerEdits: headerEditCount,
-            }))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
-
-    // Установить оценку (story points) задаче
-    if (message.type === 'setEstimate') {
-        const { jiraUrl, jiraToken, issueKey, fieldId, value } = message;
-        fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}`, {
+    async setEstimate(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        const { issueKey, fieldId, value } = message;
+        await jiraFetch(creds, `/rest/api/2/issue/${encodeURIComponent(issueKey)}`, {
             method: 'PUT',
-            headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ fields: { [fieldId]: value } }),
-            credentials: 'omit',
-        })
-            .then(r => {
-                if (r.ok || r.status === 204) return { ok: true };
-                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
-            })
-            .then(data => sendResponse(data))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
+            body: { fields: { [fieldId]: value } },
+        });
+        return { ok: true };
+    },
 
-    // Добавить комментарий к задаче
-    if (message.type === 'addComment') {
-        const { jiraUrl, jiraToken, issueKey, comment } = message;
-        fetch(`${jiraUrl}/rest/api/2/issue/${issueKey}/comment`, {
+    async addComment(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        await jiraFetch(creds, `/rest/api/2/issue/${encodeURIComponent(message.issueKey)}/comment`, {
             method: 'POST',
-            headers: jiraAuth(jiraToken, { 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ body: comment }),
-            credentials: 'omit',
-        })
-            .then(r => {
-                if (r.ok || r.status === 201) return { ok: true };
-                return jiraErrorFromResponse(r).then(msg => Promise.reject(msg));
-            })
-            .then(data => sendResponse(data))
-            .catch(err => sendResponse({ ok: false, error: friendlyError(err) }));
-        return true;
-    }
-}
+            body: { body: message.comment },
+        });
+        return { ok: true };
+    },
+
+    async diagnose(message, fromPopup) {
+        const creds = await resolveCredentials(message, fromPopup);
+        // Пробы должны идти в тех же условиях, что и отправка оценки: адрес в поле popup
+        // мог отличаться от сохранённого, а слушатель заголовков привязан к хосту.
+        refreshOriginStrip(creds.jiraUrl);
+        const results = await runDiagnostics(creds.jiraUrl, creds.jiraToken);
+        return { ok: true, results, originStrip: originStripState, headerEdits: headerEditCount };
+    },
+};
 
 if (runtime) {
     runtime.onMessage.addListener(handleMessage);

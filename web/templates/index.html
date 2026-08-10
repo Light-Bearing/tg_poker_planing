@@ -299,13 +299,14 @@
 
             <!-- Настройки -->
             <div id="jiraSettings" style="display:none;">
-                <div class="form-group">
-                    <label>URL Jira</label>
-                    <input type="text" id="jiraUrl" placeholder="https://jira.company.ru" autocomplete="off">
-                </div>
-                <div class="form-group">
-                    <label>Token (API / Personal Access)</label>
-                    <input type="password" id="jiraToken" placeholder="ваш токен" autocomplete="off">
+                <!-- Адрес Jira и токен задаются в popup расширения и хранятся только там.
+                     Страница их не получает: content script работает на любом сайте, и всё,
+                     что доступно этой странице, было бы доступно и постороннему сайту. -->
+                <div class="jira-install-help" id="jiraCredsHint" style="margin-bottom:14px;">
+                    <strong>Адрес Jira и токен</strong> задаются в popup расширения:
+                    кнопка ⧩ «Расширения» справа от адресной строки → <strong>PP Jira Bridge</strong>.
+                    Страница их не хранит и не видит.
+                    <div id="jiraConfiguredUrl" style="margin-top:6px;"></div>
                 </div>
                 <div class="form-group">
                     <label>JQL-фильтр задач</label>
