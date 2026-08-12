@@ -100,17 +100,15 @@
             </div>
 
             <div class="join-grid-bottom">
+                <!-- Свёрнутая сводка: выбор вида, значения и редактор Custom живут
+                     в окне настроек, иначе длинная шкала растягивает экран входа -->
                 <div class="scale-preview">
                     <div class="scale-title">ШКАЛА ОЦЕНОК</div>
-                    <div class="scale-selector join-scale-selector" id="joinScaleSelector">
-                        <span class="scale-selector-label">📐 Вид</span>
-                        <div class="scale-selector-buttons" id="joinScaleSelectorButtons"></div>
+                    <div class="scale-summary">
+                        <span class="scale-summary-text" id="joinScaleSummary"></span>
+                        <button class="btn btn-outline scale-summary-btn" onclick="openScaleSettings('join')">⚙ НАСТРОИТЬ</button>
                     </div>
-                    <div class="scale-points" id="scalePoints"></div>
-                    <div class="scale-legend">
-                        <span><strong>❔</strong> Не уверен</span>
-                        <span><strong>☕</strong> Нужен перерыв</span>
-                    </div>
+                    <div class="scale-points scale-points-compact" id="scalePoints"></div>
                 </div>
 
                 <div class="recent-rooms" id="recentRooms">
@@ -178,9 +176,9 @@
                 <div class="right-panel">
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
-                        <div class="scale-selector session-scale-selector" id="sessionScaleSelector">
-                            <span class="scale-selector-label">📐 Шкала</span>
-                            <div class="scale-selector-buttons" id="sessionScaleSelectorButtons"></div>
+                        <div class="scale-summary session-scale-summary" id="sessionScaleSelector">
+                            <span class="scale-summary-text" id="sessionScaleSummary"></span>
+                            <button class="btn btn-outline scale-summary-btn" onclick="openScaleSettings('session')">⚙ ШКАЛА</button>
                         </div>
                         <div style="display: flex; gap: 8px; flex-direction: column;">
                             <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
@@ -338,6 +336,32 @@
         </div>
     </div>
 
+    <!-- МОДАЛКА НАСТРОЕК ШКАЛЫ -->
+    <div id="scaleSettingsModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="scaleSettingsTitle" tabindex="-1">
+        <div class="confirm-backdrop" onclick="closeScaleSettings()"></div>
+        <div class="confirm-dialog scale-settings-dialog">
+            <div class="confirm-header">
+                <span class="confirm-icon">📐</span>
+                <span class="confirm-title" id="scaleSettingsTitle">ШКАЛА ОЦЕНОК</span>
+            </div>
+            <div class="scale-settings-body">
+                <div class="scale-selector" id="scaleSettingsSelector">
+                    <span class="scale-selector-label">📐 Вид</span>
+                    <div class="scale-selector-buttons" id="scaleSettingsButtons"></div>
+                </div>
+                <div class="scale-points" id="scaleSettingsPoints"></div>
+                <div class="scale-legend">
+                    <span><strong>❔</strong> Не уверен</span>
+                    <span><strong>☕</strong> Нужен перерыв</span>
+                </div>
+                <div class="scale-settings-hint" id="scaleSettingsHint"></div>
+            </div>
+            <div class="confirm-actions">
+                <button class="btn btn-primary" onclick="closeScaleSettings()">ГОТОВО</button>
+            </div>
+        </div>
+    </div>
+
     <!-- МОДАЛКА РЕДАКТОРА ШКАЛЫ -->
     <div id="scaleEditorModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="scaleEditorTitle" tabindex="-1">
         <div class="confirm-backdrop" onclick="closeCustomScaleEditor()"></div>
@@ -387,8 +411,10 @@
             </div>
             <div class="new-task-modal-body">
                 <div style="display:flex;gap:8px;margin-bottom:8px;">
-                    <button class="btn btn-outline" onclick="jiraRefreshIssuesForModal()" id="newTaskRefreshBtn" style="flex:1;">🔄 ОБНОВИТЬ</button>
+                    <input type="text" id="newTaskSearch" class="jira-search-input" placeholder="🔍 Поиск: ключ, заголовок, эпик" autocomplete="off" oninput="onNewTaskSearchInput()">
+                    <button class="btn btn-outline" onclick="jiraRefreshIssuesForModal()" id="newTaskRefreshBtn">🔄 ОБНОВИТЬ</button>
                 </div>
+                <div class="jira-search-count" id="newTaskSearchCount"></div>
                 <div class="jira-tree-wrapper">
                     <div id="newTaskTree" class="jira-tree"></div>
                 </div>
@@ -431,6 +457,7 @@
         })();
     </script>
     <script src="/static/wiki-parser.js"></script>
+    <script src="/static/jira-search.js"></script>
     <script src="/static/adf-parser.js"></script>
     <script src="/static/script.js"></script>
 </body>

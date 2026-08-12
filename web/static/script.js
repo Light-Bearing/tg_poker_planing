@@ -22,6 +22,7 @@ let state = {
     ws: null,
     reconnectAttempts: 0,
     wasRevealed: false,
+    session: null,          // последняя сессия с сервера: нужна окну настроек шкалы
     soundEnabled: localStorage.getItem('pp_sound_enabled') !== 'false'
 };
 
@@ -1180,36 +1181,88 @@ let _newTaskModalSelected = null;
 function openNewTaskModal() {
     const modal = document.getElementById('newTaskModal');
     if (!modal) return;
-    
+
     // Обновляем данные задач перед открытием
     jiraLoadIssues().then(() => {
         modal.classList.remove('hidden');
         _newTaskModalSelected = null;
         document.getElementById('newTaskApplyBtn').disabled = true;
 
-        // Рендерим дерево (такой же вид как на экране подключения)
-        const treeContainer = document.getElementById('newTaskTree');
-        if (!treeContainer) return;
-
-        renderJiraTree(treeContainer, {
-            onSelect: (el, key) => selectNewTaskTreeItem(el, key),
-            emptyMessage: 'Нет задач. Нажмите 🔄 ОБНОВИТЬ',
-        });
-
-        // При клике на элемент
-        treeContainer.querySelectorAll('.jira-tree-item').forEach(el => {
-            el.addEventListener('dblclick', () => {
-                const key = el.dataset.key;
-                if (key) applyNewTaskFromModal();
-            });
-        });
-
-        // Автовыбор первого элемента
-        setTimeout(() => {
-            const firstItem = treeContainer.querySelector('.jira-tree-item');
-            if (firstItem) firstItem.click();
-        }, 100);
+        const search = document.getElementById('newTaskSearch');
+        if (search) {
+            search.value = '';
+            search.focus();
+        }
+        renderNewTaskTree();
     });
+}
+
+// Рисует дерево окна выбора с учётом строки поиска.
+// Отдельная функция, потому что дерево перерисовывается на каждое нажатие клавиши.
+function renderNewTaskTree() {
+    const treeContainer = document.getElementById('newTaskTree');
+    if (!treeContainer) return;
+
+    const search = document.getElementById('newTaskSearch');
+    const query = search ? search.value : '';
+    const filtered = filterJiraIssues(jiraIssues, query, epicMap, jiraEpicLinkField);
+
+    renderJiraTree(treeContainer, {
+        onSelect: (el, key) => selectNewTaskTreeItem(el, key),
+        issues: filtered,
+        emptyMessage: query.trim()
+            ? 'Ничего не найдено. Попробуйте другой запрос'
+            : 'Нет задач. Нажмите 🔄 ОБНОВИТЬ',
+    });
+
+    // При поиске разворачиваем группы: иначе найденное прячется за свёрнутым эпиком
+    if (query.trim()) {
+        treeContainer.querySelectorAll('.jira-tree-children').forEach(el => el.classList.add('open'));
+        treeContainer.querySelectorAll('.jira-tree-toggle').forEach(el => { el.textContent = '▼'; });
+    }
+
+    treeContainer.querySelectorAll('.jira-tree-item').forEach(el => {
+        el.addEventListener('dblclick', () => {
+            const key = el.dataset.key;
+            if (key) applyNewTaskFromModal();
+        });
+    });
+
+    updateNewTaskSearchCount(filtered.length, jiraIssues.length, query);
+
+    // Автовыбор первого элемента: с поиском из одной задачи выбирать вручную незачем
+    setTimeout(() => {
+        const firstItem = treeContainer.querySelector('.jira-tree-item');
+        if (firstItem) firstItem.click();
+    }, 100);
+}
+
+function updateNewTaskSearchCount(shown, total, query) {
+    const el = document.getElementById('newTaskSearchCount');
+    if (!el) return;
+    if (!query.trim() || total === 0) {
+        el.textContent = '';
+        return;
+    }
+    el.textContent = `Найдено ${shown} из ${total} ${pluralTasks(total)}`;
+}
+
+function pluralTasks(n) {
+    const tail = n % 100;
+    if (tail >= 11 && tail <= 14) return 'задач';
+    switch (n % 10) {
+        case 1: return 'задачи';
+        case 2:
+        case 3:
+        case 4: return 'задач';
+        default: return 'задач';
+    }
+}
+
+// Поиск идёт по уже загруженным задачам, поэтому перерисовка мгновенна
+// и придерживать ввод таймером незачем.
+function onNewTaskSearchInput() {
+    renderNewTaskTree();
 }
 
 function closeNewTaskModal() {
@@ -1225,14 +1278,9 @@ async function jiraRefreshIssuesForModal() {
     await jiraLoadIssues();
     btn.disabled = false;
     btn.textContent = '🔄 ОБНОВИТЬ';
-    // Перерендериваем дерево
-    const treeContainer = document.getElementById('newTaskTree');
-    if (treeContainer && jiraIssues.length > 0) {
-        renderJiraTreeInContainer(treeContainer, (key) => {
-            _newTaskModalSelected = key;
-            document.getElementById('newTaskApplyBtn').disabled = false;
-        });
-    }
+    // Перерисовываем через тот же путь, что и поиск: иначе обновление сбрасывало
+    // введённый запрос и показывало все задачи заново
+    renderNewTaskTree();
 }
 
 async function applyNewTaskFromModal() {
@@ -1285,21 +1333,6 @@ async function applyNewTaskFromModal() {
     await restartSession(newText);
 }
 
-function renderJiraTreeInContainer(container, onSelect) {
-    renderJiraTree(container, {
-        onSelect: (el, key) => selectNewTaskTreeItem(el, key),
-        showPriority: true,
-        prepopulateWithEpics: true,
-    });
-    if (onSelect) {
-        container.querySelectorAll('.jira-tree-item').forEach(el => {
-            el.addEventListener('dblclick', () => {
-                const key = el.dataset.key;
-                if (key) applyNewTaskFromModal();
-            });
-        });
-    }
-}
 
 function selectNewTaskTreeItem(el, key) {
     document.querySelectorAll('#newTaskTree .jira-tree-item').forEach(i => i.classList.remove('selected'));
@@ -1438,36 +1471,43 @@ function renderScalePoints(scaleName) {
     }).join('');
 }
 
+// Сводка шкалы на экране входа: название и число значений вместо всего блока
 function renderJoinScaleSelector() {
-    const container = document.getElementById('joinScaleSelector');
-    const buttonsContainer = document.getElementById('joinScaleSelectorButtons');
-    if (!container || !buttonsContainer) return;
-
-    const scaleNames = Object.keys(SERVER_SCALE_NAMES).length > 0 ? SERVER_SCALE_NAMES : { custom: 'Custom' };
-    let entries = Object.entries(scaleNames);
-
-    if (entries.length <= 1) {
-        container.style.display = 'none';
-        return;
+    const summary = document.getElementById('joinScaleSummary');
+    if (summary) {
+        summary.textContent = describeScale(CURRENT_SCALE_NAME, scalePointsFor(CURRENT_SCALE_NAME));
     }
+    // Окно настроек может быть открыто прямо сейчас — держим его в согласии
+    if (isScaleSettingsOpen()) renderScaleSettings();
+}
 
-    // Сортируем: custom — в конец
-    entries.sort((a, b) => {
-        if (a[0] === 'custom') return 1;
-        if (b[0] === 'custom') return -1;
-        return 0;
-    });
+// Название шкалы и число значений: «Fibonacci · 9 значений»
+function describeScale(scaleName, points) {
+    const names = typeof SERVER_SCALE_NAMES !== 'undefined' ? SERVER_SCALE_NAMES : {};
+    const label = (names && names[scaleName]) || scaleName || '—';
+    const count = (points || []).length;
+    return `${label} · ${count} ${pluralValues(count)}`;
+}
 
-    container.style.display = 'flex';
-    let html = '';
-    for (const [key, label] of entries) {
-        const active = key === CURRENT_SCALE_NAME ? 'active' : '';
-        html += `<button class="scale-btn ${active}" data-scale="${key}" onclick="onJoinScaleClick('${key}')">${label}</button>`;
-        if (key === 'custom') {
-            html += `<button class="scale-edit-btn ${CURRENT_SCALE_NAME === 'custom' ? 'visible' : ''}" onclick="event.stopPropagation(); openCustomScaleEditor()" title="Редактировать пользовательскую шкалу">✏️</button>`;
-        }
+function pluralValues(n) {
+    const tail = n % 100;
+    if (tail >= 11 && tail <= 14) return 'значений';
+    switch (n % 10) {
+        case 1: return 'значение';
+        case 2:
+        case 3:
+        case 4: return 'значения';
+        default: return 'значений';
     }
-    buttonsContainer.innerHTML = html;
+}
+
+// Значения выбранной шкалы. Один источник для сводки, превью и окна настроек.
+function scalePointsFor(scaleName) {
+    const scales = typeof SERVER_SCALES !== 'undefined' ? SERVER_SCALES : null;
+    if (scales && scaleName && scales[scaleName]) return scales[scaleName];
+    return typeof SERVER_AVAILABLE_POINTS !== 'undefined'
+        ? SERVER_AVAILABLE_POINTS
+        : ['1', '2', '3', '5', '8', '13', '21', '❔', '☕'];
 }
 
 function onJoinScaleClick(scaleName) {
@@ -1477,30 +1517,115 @@ function onJoinScaleClick(scaleName) {
     renderScalePoints(scaleName);
 }
 
-function renderSessionScaleSelector(session) {
-    const container = document.getElementById('sessionScaleSelector');
-    const buttonsContainer = document.getElementById('sessionScaleSelectorButtons');
-    if (!container || !buttonsContainer) return;
+// ==================== ОКНО НАСТРОЕК ШКАЛЫ ====================
+//
+// Выбор вида, значения и переход в редактор Custom вынесены из обоих экранов сюда:
+// на экране входа длинная шкала растягивала страницу, а в комнате ряд кнопок
+// занимал панель управления.
+//
+// Контекст решает, куда уходит выбор: 'join' — только в этот браузер (комнаты ещё нет),
+// 'session' — на сервер, всей комнате.
+let scaleSettingsContext = 'join';
 
-    const scaleNames = session.scale_names || SERVER_SCALE_NAMES || {};
-    let entries = Object.entries(scaleNames);
-    if (entries.length <= 1) {
-        container.style.display = 'none';
-        return;
+function isScaleSettingsOpen() {
+    const modal = document.getElementById('scaleSettingsModal');
+    return Boolean(modal) && !modal.classList.contains('hidden');
+}
+
+function openScaleSettings(context = 'join') {
+    const modal = document.getElementById('scaleSettingsModal');
+    if (!modal) return;
+    scaleSettingsContext = context;
+    renderScaleSettings();
+    modal.classList.remove('hidden');
+    modal.focus();
+}
+
+function closeScaleSettings() {
+    const modal = document.getElementById('scaleSettingsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+// Какая шкала выбрана сейчас — в комнате её задаёт сессия, на входе локальный выбор
+function currentScaleName() {
+    if (scaleSettingsContext === 'session' && state.session && state.session.scale_name) {
+        return state.session.scale_name;
     }
+    return CURRENT_SCALE_NAME;
+}
 
-    // Сортируем: custom — в конец (как на экране входа)
-    entries.sort((a, b) => {
+function renderScaleSettings() {
+    const buttons = document.getElementById('scaleSettingsButtons');
+    const points = document.getElementById('scaleSettingsPoints');
+    const hint = document.getElementById('scaleSettingsHint');
+    if (!buttons || !points) return;
+
+    const inSession = scaleSettingsContext === 'session';
+    const names = (inSession && state.session && state.session.scale_names) || SERVER_SCALE_NAMES || {};
+    const selected = currentScaleName();
+
+    const entries = Object.entries(names).sort((a, b) => {
         if (a[0] === 'custom') return 1;
         if (b[0] === 'custom') return -1;
         return 0;
     });
 
-    container.style.display = 'flex';
-    buttonsContainer.innerHTML = entries.map(([key, label]) => {
-        const active = key === session.scale_name ? 'active' : '';
-        return `<button class="scale-btn ${active}" data-scale="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+    buttons.innerHTML = entries.map(([key, label]) => {
+        const active = key === selected ? ' active' : '';
+        return `<button class="scale-btn${active}" data-scale="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+    }).join('') + (names.custom !== undefined
+        ? '<button class="scale-edit-btn visible" id="scaleSettingsEditBtn" title="Редактировать пользовательскую шкалу">✏️</button>'
+        : '');
+
+    points.innerHTML = scalePointsFor(selected).map(point => {
+        const isSpecial = SPECIAL_POINTS.includes(point);
+        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${escapeHtml(point)}</div>`;
     }).join('');
+
+    if (hint) {
+        hint.textContent = inSession
+            ? 'Смена шкалы сбрасывает голоса и видна всей команде.'
+            : 'Выбор запомнится в этом браузере и применится к новой комнате.';
+    }
+}
+
+function onScaleSettingsClick(event) {
+    const editBtn = event.target.closest('#scaleSettingsEditBtn');
+    if (editBtn) {
+        openCustomScaleEditor();
+        return;
+    }
+    const btn = event.target.closest('.scale-btn');
+    if (!btn) return;
+
+    const scaleName = btn.dataset.scale;
+    if (scaleSettingsContext === 'session') {
+        setScale(scaleName);
+    } else {
+        onJoinScaleClick(scaleName);
+    }
+    renderScaleSettings();
+}
+
+// В комнате — та же сводка: название шкалы и кнопка, открывающая окно настроек
+function renderSessionScaleSelector(session) {
+    const container = document.getElementById('sessionScaleSelector');
+    const summary = document.getElementById('sessionScaleSummary');
+    if (!container || !summary) return;
+
+    const scaleNames = session.scale_names || SERVER_SCALE_NAMES || {};
+    if (Object.keys(scaleNames).length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'flex';
+    const label = scaleNames[session.scale_name] || session.scale_name || '—';
+    const count = (session.available_points || scalePointsFor(session.scale_name)).length;
+    summary.textContent = `📐 ${label} · ${count} ${pluralValues(count)}`;
+
+    // Шкалу могли сменить с другого места — окно, если открыто, должно это показать
+    if (isScaleSettingsOpen() && scaleSettingsContext === 'session') renderScaleSettings();
 }
 
 // ==================== CUSTOM SCALE EDITOR ====================
@@ -1962,12 +2087,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const sessionScaleButtons = document.getElementById('sessionScaleSelectorButtons');
-    if (sessionScaleButtons) {
-        sessionScaleButtons.addEventListener('click', (e) => {
-            const btn = e.target.closest('.scale-btn');
-            if (btn) setScale(btn.dataset.scale);
-        });
+    // Кнопки шкалы рисуются заново при каждом открытии окна — слушатель на контейнере
+    const scaleSettingsButtons = document.getElementById('scaleSettingsButtons');
+    if (scaleSettingsButtons) {
+        scaleSettingsButtons.addEventListener('click', onScaleSettingsClick);
     }
 
     // ✅ Инициализируем AudioContext только если звук включен (по умолчанию)
@@ -2418,6 +2541,7 @@ function syncMyVoteFromSession(session) {
 }
 
 function updateSessionDisplay(session) {
+    state.session = session;
     state.isInitiator = (session.initiator_id === `web_${state.username}`);
 
     if (session.revealed && !state.wasRevealed) {

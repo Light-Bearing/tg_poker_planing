@@ -1050,6 +1050,91 @@ code {
     border-top: 1px dashed var(--border);
 }
 
+/* ==================== СВОДКА ШКАЛЫ И ОКНО НАСТРОЕК ==================== */
+
+/* Строка «Fibonacci · 9 значений» с кнопкой вместо всего блока управления:
+   длинная пользовательская шкала растягивала экран входа и панель в комнате */
+.scale-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.scale-summary-text {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scale-summary-btn {
+    flex-shrink: 0;
+    padding: 6px 12px;
+    font-size: 0.72em;
+}
+
+.session-scale-summary {
+    margin-bottom: 8px;
+}
+
+/* Превью на экране входа: не больше двух рядов, дальше прокрутка.
+   Иначе шкала из тридцати значений снова растянет страницу. */
+.scale-points-compact {
+    max-height: 76px;
+    overflow-y: auto;
+}
+
+.scale-settings-dialog {
+    max-width: 560px;
+    width: 100%;
+}
+
+.scale-settings-body {
+    padding: 16px 20px;
+}
+
+.scale-settings-body .scale-points {
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.scale-settings-hint {
+    margin-top: 12px;
+    color: var(--text-secondary);
+    font-size: 0.78em;
+    line-height: 1.4;
+}
+
+/* ==================== ПОИСК ПО ЗАДАЧАМ ==================== */
+
+.jira-search-input {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    background: var(--bg-body);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    font-family: var(--font-mono);
+    font-size: 0.82em;
+}
+
+.jira-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.jira-search-count {
+    color: var(--text-secondary);
+    font-size: 0.75em;
+    margin-bottom: 6px;
+    min-height: 14px;
+}
+
 .recent-rooms {
     padding: 18px;
     background: var(--bg-input);
@@ -1191,10 +1276,6 @@ code {
     border-radius: 2px;
 }
 
-.join-scale-selector {
-    margin-bottom: 12px;
-}
-
 .scale-selector-buttons {
     display: flex;
     gap: 4px;
@@ -1236,7 +1317,6 @@ code {
     text-transform: uppercase;
     white-space: nowrap;
 }
-
 
 
 /* ========== FORMS ========== */
@@ -2413,7 +2493,3 @@ code {
     accent-color: var(--accent);
 }
 
-.session-scale-selector {
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-}
