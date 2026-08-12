@@ -479,7 +479,11 @@ function updateJiraHeaderBtn() {
 async function jiraAutoConnect() {
     if (jiraAutoConnecting || jiraConnected) return;
     if (!hasJiraExt()) return;
-    if (!jiraSettings.configured) return;
+    // Спрашиваем расширение сами, если признак ещё не известен.
+    // В Chrome content script появляется после DOMContentLoaded, поэтому путь, который
+    // узнаёт настройки при загрузке, вообще не отрабатывает: расширения тогда ещё нет.
+    // Автоподключение выходило молча, и задачи не грузились никогда.
+    if (!jiraSettings.configured && !(await jiraRefreshSettings())) return;
 
     jiraAutoConnecting = true;
     console.log('Jira: auto-connecting...');
@@ -3030,13 +3034,17 @@ async function leaveSession() {
     }
 }
 
-function copySessionLink() {
-    navigator.clipboard.writeText(`${window.location.origin}?session=${state.sessionId}`).then(() => {
+async function copySessionLink() {
+    const link = `${window.location.origin}?session=${state.sessionId}`;
+    if (await copyText(link)) {
         toast.success('Ссылка на комнату скопирована', 'ССЫЛКА');
-    }).catch(() => toast.error('Не удалось скопировать ссылку'));
+    } else {
+        // Показываем сам адрес: скопировать вручную всё же можно
+        toast.error(`Не удалось скопировать. Адрес: ${link}`);
+    }
 }
 
-function copySessionId(event) {
+async function copySessionId(event) {
     // ✅ Останавливаем всплытие, чтобы не сработал обработчик родителя
     if (event) {
         event.stopPropagation();
@@ -3046,34 +3054,38 @@ function copySessionId(event) {
     const sessionId = state.sessionId;
     if (!sessionId) return;
     
-    navigator.clipboard.writeText(sessionId).then(() => {
-        const el = document.getElementById('sessionIdDisplay');
-        const original = el.textContent;
-        el.textContent = '✓ СКОПИРОВАНО';
-        el.classList.add('copied');
-        toast.success('ID комнаты скопирован', 'КОМНАТА');
-        setTimeout(() => { 
-            el.textContent = original; 
-            el.classList.remove('copied');
-        }, 2000);
-    }).catch(() => toast.error('Не удалось скопировать ID'));
+    if (!(await copyText(sessionId))) {
+        toast.error(`Не удалось скопировать. ID комнаты: ${sessionId}`);
+        return;
+    }
+    const el = document.getElementById('sessionIdDisplay');
+    const original = el.textContent;
+    el.textContent = '✓ СКОПИРОВАНО';
+    el.classList.add('copied');
+    toast.success('ID комнаты скопирован', 'КОМНАТА');
+    setTimeout(() => {
+        el.textContent = original;
+        el.classList.remove('copied');
+    }, 2000);
 }
 
-function copyResult() {
+async function copyResult() {
     const val = document.getElementById('resultValue').textContent;
     if (val === '-') return;
-    
+
     const rounded = Math.ceil(parseFloat(val));
-    
-    navigator.clipboard.writeText(rounded).then(() => {
-        const label = document.getElementById('resultLabel');
-        const original = label.textContent;
-        label.textContent = '✓ СКОПИРОВАНО В БУФЕР!';
-        label.style.color = 'var(--success)';
-        toast.success(`Оценка ${rounded} скопирована`, 'РЕЗУЛЬТАТ');
-        setTimeout(() => { 
-            label.textContent = original; 
-            label.style.color = 'var(--text-secondary)';
-        }, 2000);
-    }).catch(() => toast.error('Не удалось скопировать результат'));
+
+    if (!(await copyText(rounded))) {
+        toast.error(`Не удалось скопировать. Оценка: ${rounded}`);
+        return;
+    }
+    const label = document.getElementById('resultLabel');
+    const original = label.textContent;
+    label.textContent = '✓ СКОПИРОВАНО В БУФЕР!';
+    label.style.color = 'var(--success)';
+    toast.success(`Оценка ${rounded} скопирована`, 'РЕЗУЛЬТАТ');
+    setTimeout(() => {
+        label.textContent = original;
+        label.style.color = 'var(--text-secondary)';
+    }, 2000);
 }

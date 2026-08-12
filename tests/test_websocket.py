@@ -271,6 +271,8 @@ class TestConnectionManager:
 
     def test_get_enriched_data_with_game(self):
         manager.register_user("s1", "alice")
+        # online означает «есть живой сокет», поэтому его надо зарегистрировать
+        manager.register_ws_connection("s1", "alice", MagicMock())
 
         async def test():
             game = state.storage.new_game(

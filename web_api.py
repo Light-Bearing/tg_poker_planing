@@ -123,7 +123,10 @@ def enrich_session_response(game: Game, session_id: str) -> dict:
             participants_dict[user_id] = {
                 "user_id": user_id,
                 "username": username,
-                "online": True,
+                # Не «есть в session_users», а «сейчас на связи»: session_users при
+                # отключении намеренно не чистится — он нужен для переподключения и
+                # подсчёта автовскрытия, — и вышедший участник оставался «в сети» навсегда.
+                "online": manager.is_ws_connected(session_id, username),
                 "vote": canonical_votes.get(user_id),
             }
 

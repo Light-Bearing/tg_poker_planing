@@ -472,6 +472,8 @@ class TestEnrichSessionResponse:
         from web_api import enrich_session_response
 
         manager.register_user("s1", "alice")
+        # online означает «есть живой сокет», поэтому его надо зарегистрировать
+        manager.register_ws_connection("s1", "alice", MagicMock())
         game = Game("web", "s1", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task")
         game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "3")
         result = enrich_session_response(game, "s1")
@@ -847,3 +849,67 @@ class TestPollingThread:
             _asyncio.run(main_fn())
 
         assert create.call_args.kwargs["with_updater"] is True
+
+
+class TestUserOnlineStatus:
+    """Признак online участника.
+
+    Он брался из session_users, а этот словарь при отключении намеренно не чистится:
+    он нужен для переподключения и подсчёта автовскрытия. Из-за этого вышедший
+    участник у остальных навсегда оставался «в сети».
+    """
+
+    def _подготовить(self):
+        import asyncio
+
+        from connection import manager
+        from ppbot.game import Game
+
+        manager.session_users.clear()
+        manager.ws_username_map.clear()
+        manager.active_connections.clear()
+        ws = MagicMock()
+        ws.accept = AsyncMock()
+        asyncio.run(manager.connect("s1", ws))
+        manager.register_user("s1", "alice")
+        manager.register_ws_connection("s1", "alice", ws)
+        manager.register_user("s1", "bob")
+        manager.register_ws_connection("s1", "bob", MagicMock())
+        game = Game(-100, "s1", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task")
+        return manager, game, ws
+
+    def test_подключённые_участники_в_сети(self):
+        from web_api import enrich_session_response
+
+        manager, game, _ = self._подготовить()
+        участники = {p["username"]: p for p in enrich_session_response(game, "s1")["participants"]}
+        assert участники["alice"]["online"] is True
+        assert участники["bob"]["online"] is True
+        manager.session_users.clear()
+        manager.ws_username_map.clear()
+
+    def test_вышедший_перестаёт_быть_в_сети(self):
+        from web_api import enrich_session_response
+
+        manager, game, ws = self._подготовить()
+        manager.disconnect("s1", ws, username="alice")
+
+        участники = {p["username"]: p for p in enrich_session_response(game, "s1")["participants"]}
+        assert участники["alice"]["online"] is False, "вышедший показан в сети"
+        assert участники["bob"]["online"] is True, "оставшийся пропал из сети"
+        # Сам участник из списка не исчезает: он вернётся, и его голос учитывается
+        assert "alice" in участники
+        manager.session_users.clear()
+        manager.ws_username_map.clear()
+
+    def test_вернувшийся_снова_в_сети(self):
+        from web_api import enrich_session_response
+
+        manager, game, ws = self._подготовить()
+        manager.disconnect("s1", ws, username="alice")
+        manager.register_ws_connection("s1", "alice", MagicMock())
+
+        участники = {p["username"]: p for p in enrich_session_response(game, "s1")["participants"]}
+        assert участники["alice"]["online"] is True
+        manager.session_users.clear()
+        manager.ws_username_map.clear()
