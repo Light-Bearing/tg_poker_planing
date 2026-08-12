@@ -44,7 +44,7 @@ test('список разбирается по строкам, запятым и
     ]);
 });
 
-test('мусорные строки в списке молча отбрасываются, а не открывают доступ', () => {
+test('мусорные строки в списке не открывают доступ', () => {
     assert.deepStrictEqual(parseAllowedOrigins('https://ok.example.ru\nне адрес\n\n'), ['https://ok.example.ru']);
     assert.deepStrictEqual(parseAllowedOrigins(''), []);
     assert.deepStrictEqual(parseAllowedOrigins(undefined), []);
@@ -83,4 +83,52 @@ test('разрешён только точный адрес из списка', 
 
 test('адрес без происхождения не проходит ни при каком списке', () => {
     assert.strictEqual(isAllowedOrigin('', ['https://planning.example.ru']), false);
+});
+
+// --- Адрес без схемы ---
+//
+// Владелец скопировал адрес из строки браузера и вставил «localhost:8000».
+// Такая запись молча выбрасывалась: список оставался пустым, расширение
+// продолжало отказывать, а popup показывал очищенное поле без объяснений.
+
+const { parseAllowedOriginsDetailed, guessScheme } = require('../../browser-extension/background.js');
+
+test('адрес без схемы принимается, а не выбрасывается молча', () => {
+    assert.strictEqual(normalizeOrigin('localhost:8000'), 'http://localhost:8000');
+    assert.strictEqual(normalizeOrigin('planning.example.ru'), 'https://planning.example.ru');
+});
+
+test('локальным адресам и голым IP подставляется http, доменам https', () => {
+    assert.strictEqual(guessScheme('localhost:8000'), 'http:');
+    assert.strictEqual(guessScheme('127.0.0.1'), 'http:');
+    assert.strictEqual(guessScheme('195.58.52.143:8000'), 'http:');
+    assert.strictEqual(guessScheme('planning.example.ru'), 'https:');
+    assert.strictEqual(normalizeOrigin('195.58.52.143:8000'), 'http://195.58.52.143:8000');
+});
+
+test('явная схема сильнее догадки', () => {
+    assert.strictEqual(normalizeOrigin('https://localhost:8000'), 'https://localhost:8000');
+    assert.strictEqual(normalizeOrigin('http://planning.example.ru'), 'http://planning.example.ru');
+});
+
+test('непонятые строки называются, а не пропадают', () => {
+    const разбор = parseAllowedOriginsDetailed('localhost:8000\nне адрес\nfile:///etc/passwd\nадрес');
+    assert.deepStrictEqual(разбор.origins, ['http://localhost:8000']);
+    // Строка с пробелом показывается целиком: адрес пробелов не содержит,
+    // а разбитая на слова она превращалась в пару «валидных» доменов
+    assert.deepStrictEqual(разбор.dropped, ['не адрес', 'file:///etc/passwd', 'адрес']);
+});
+
+test('повторы схлопываются', () => {
+    const разбор = parseAllowedOriginsDetailed('localhost:8000\nhttp://localhost:8000\nLOCALHOST:8000');
+    assert.deepStrictEqual(разбор.origins, ['http://localhost:8000']);
+});
+
+test('случайное слово доменом не становится', () => {
+    // URL принимает любое слово за имя хоста, и «проверка» оседала в списке разрешённых
+    assert.strictEqual(normalizeOrigin('проверка'), null);
+    assert.strictEqual(normalizeOrigin('adres'), null);
+    // Но одиночное имя хоста с портом или схемой — обычный внутренний стенд
+    assert.strictEqual(normalizeOrigin('jira:8080'), 'https://jira:8080');
+    assert.strictEqual(normalizeOrigin('http://myhost'), 'http://myhost');
 });

@@ -120,6 +120,34 @@
     .hidden {
       display: none;
     }
+    /* Отклонённые адреса: предлагаем разрешить кнопкой, чтобы не набирать руками */
+    .blocked-origins {
+      background: #fff3cd;
+      border-left: 3px solid #ffc107;
+      padding: 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #856404;
+    }
+    .blocked-origin-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .blocked-origin-name {
+      flex: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .blocked-origin-row button {
+      width: auto;
+      margin: 0;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
     /* Вывод диагностики: текст должен выделяться и копироваться целиком */
     .diagnose-output {
       margin-top: 8px;
@@ -171,12 +199,17 @@
   <div class="section">
     <div class="section-title">Доступ со страниц</div>
 
+    <div id="blockedOrigins" class="blocked-origins hidden"></div>
+
     <label for="allowedOrigins">Адреса Planning Poker</label>
-    <textarea id="allowedOrigins" rows="3" placeholder="https://planning.example.ru&#10;http://localhost:8000"></textarea>
+    <textarea id="allowedOrigins" rows="3" placeholder="localhost:8000&#10;planning.example.ru"></textarea>
     <div class="help-text">
-      По одному адресу в строке, только схема и хост. Страницы с других адресов
-      расширение не обслуживает: иначе любой открытый сайт мог бы запросить у него
-      сохранённый токен Jira. Пока список пуст, работает только этот popup.
+      По одному адресу в строке. Схему можно не писать — подставится сама,
+      после сохранения поле покажет, что получилось.
+      <br>
+      Расширение работает только со страницами из этого списка. Без него любой
+      открытый сайт мог бы через расширение распоряжаться вашей Jira: content script
+      установлен на все страницы, и отличить Planning Poker от чужого сайта иначе нечем.
     </div>
   </div>
 

@@ -62,26 +62,70 @@ function jiraAuth(token, extra = {}, atlassianToken = 'no-check') {
 const ORIGIN_NOT_ALLOWED = 'ORIGIN_NOT_ALLOWED';
 
 // Приводит адрес к виду «схема://хост[:порт]». null — если разобрать не удалось.
+//
+// Схему можно не писать: владелец копирует адрес из строки браузера или набирает
+// «localhost:8000» — и раньше такая запись молча пропадала, а расширение продолжало
+// отказывать без всякого объяснения. Для localhost и голых IP подставляем http,
+// для доменных имён https; что получилось, popup показывает обратно.
 function normalizeOrigin(value) {
     if (!value) return null;
-    const text = String(value).trim();
+    let text = String(value).trim();
     if (!text) return null;
+
+    const hadScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+    if (!hadScheme) {
+        text = `${guessScheme(text)}//${text}`;
+    }
+
     try {
         const u = new URL(text);
         if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        if (!u.hostname) return null;
+        if (!looksLikeHost(u.hostname, Boolean(u.port), hadScheme)) return null;
         return `${u.protocol}//${u.host}`.toLowerCase();
     } catch (_) {
         return null;
     }
 }
 
-// Разбирает список из поля popup: по одному адресу в строке, пустые строки и мусор
-// отбрасываются молча — иначе опечатка тихо открыла бы мост не тому адресу.
+// Одно слово без точки, порта и схемы адресом не считаем. Иначе случайный текст
+// в поле — «адрес», «проверка» — превращался бы в валидный домен и оседал в списке
+// разрешённых: URL с радостью принимает любое слово за имя хоста.
+function looksLikeHost(hostname, hasPort, hadScheme) {
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') return true;
+    if (hostname.includes('.')) return true;
+    return hasPort || hadScheme;
+}
+
+// Стенд в локальной сети почти всегда по http, доменное имя — почти всегда по https
+function guessScheme(hostAndPort) {
+    const host = String(hostAndPort).split('/')[0].split(':')[0].toLowerCase();
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+    return isLocal || isIp ? 'http:' : 'https:';
+}
+
+/**
+ * Разбирает список из поля popup: по одному адресу в строке.
+ * @returns {{origins: string[], dropped: string[]}} что принято и что не разобралось
+ */
+function parseAllowedOriginsDetailed(text) {
+    const origins = [];
+    const dropped = [];
+    for (const part of String(text || '').split(/[\n,;]+/).map(s => s.trim())) {
+        if (!part) continue;
+        const origin = normalizeOrigin(part);
+        if (origin) {
+            if (!origins.includes(origin)) origins.push(origin);
+        } else {
+            dropped.push(part);
+        }
+    }
+    return { origins, dropped };
+}
+
 function parseAllowedOrigins(text) {
-    return String(text || '')
-        .split(/[\s,;]+/)
-        .map(normalizeOrigin)
-        .filter(Boolean);
+    return parseAllowedOriginsDetailed(text).origins;
 }
 
 // Пришло ли сообщение со страницы (а не из popup расширения)
@@ -99,6 +143,15 @@ function senderOrigin(sender) {
 function isAllowedOrigin(origin, allowed) {
     if (!origin) return false;
     return (allowed || []).includes(origin);
+}
+
+// Адреса, которым отказали. Нужны popup, чтобы предложить их кнопкой.
+const BLOCKED_ORIGINS_LIMIT = 5;
+let blockedOrigins = [];
+
+function rememberBlockedOrigin(origin) {
+    if (!origin) return;
+    blockedOrigins = [origin, ...blockedOrigins.filter(o => o !== origin)].slice(0, BLOCKED_ORIGINS_LIMIT);
 }
 
 // Чтение хранилища одинаково в обоих браузерах: browser.* отвечает промисом,
@@ -413,6 +466,11 @@ function handleMessage(message, sender, sendResponse) {
             if (isAllowedOrigin(origin, result && result.allowedOrigins)) {
                 handleTrustedMessage(message, sendResponse, false);
             } else {
+                // Запоминаем отклонённый адрес: popup предложит разрешить его одной
+                // кнопкой, чтобы владельцу не пришлось набирать адрес руками и гадать
+                // про схему. Хранится в памяти — список отказов переживать перезапуск
+                // незачем, а лишних записей в хранилище лучше не делать.
+                rememberBlockedOrigin(origin);
                 sendResponse({ ok: false, error: ORIGIN_NOT_ALLOWED, origin: origin || '' });
             }
         });
@@ -485,18 +543,23 @@ const HANDLERS = {
         take('epicLinkField');
 
         // Адрес Jira, токен и список разрешённых адресов принимаются только из popup
+        let dropped = [];
         if (fromPopup) {
             take('jiraUrl');
             take('jiraToken');
             if ('allowedOrigins' in message) {
-                settings.allowedOrigins = parseAllowedOrigins(message.allowedOrigins);
+                const разбор = parseAllowedOriginsDetailed(message.allowedOrigins);
+                settings.allowedOrigins = разбор.origins;
+                dropped = разбор.dropped;
             }
             // Хост Jira мог смениться — слушатель заголовков должен слушать новый
             if ('jiraUrl' in message) refreshOriginStrip(message.jiraUrl);
         }
 
         await storage.local.set(settings);
-        return { ok: true };
+        // О непонятых строках говорим вслух: молча выброшенный адрес выглядел как
+        // «сохранил, а расширение всё равно отказывает»
+        return { ok: true, droppedOrigins: dropped };
     },
 
     async getSettings() {
@@ -507,6 +570,11 @@ const HANDLERS = {
         // сам. Вместо него признак настроенности, по которому страница решает, что рисовать.
         const { jiraToken, ...safe } = stored || {};
         return { ...safe, configured: Boolean(stored && stored.jiraUrl && jiraToken) };
+    },
+
+    // Адреса, которым отказали. Только для popup: странице знать чужие адреса незачем.
+    async blockedOrigins(_message, fromPopup) {
+        return { ok: true, origins: fromPopup ? blockedOrigins.slice() : [] };
     },
 
     async testConnection(message, fromPopup) {
@@ -576,7 +644,7 @@ if (typeof module !== 'undefined' && module.exports) {
         describeJiraError, stripToken, safeSnippet, DIAGNOSE_PROBES,
         jiraOriginPattern, isOwnRequest, withoutOriginHeaders,
         jiraAuth, jiraOriginValue, probeMode, applyHeaderMode, PROBE_HEADER,
-        normalizeOrigin, parseAllowedOrigins, isPageSender, senderOrigin, isAllowedOrigin,
-        ORIGIN_NOT_ALLOWED,
+        normalizeOrigin, parseAllowedOrigins, parseAllowedOriginsDetailed, guessScheme,
+        isPageSender, senderOrigin, isAllowedOrigin, ORIGIN_NOT_ALLOWED,
     };
 }

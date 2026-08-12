@@ -38,6 +38,75 @@ function showVersion() {
   }
 }
 
+// Показать адреса, которым расширение отказало, и предложить разрешить их кнопкой.
+// Набирать адрес руками не нужно: он уже приведён к нужному виду, без гадания про схему.
+async function showBlockedOrigins() {
+  const box = document.getElementById('blockedOrigins');
+  if (!box) return;
+
+  let resp;
+  try {
+    resp = await browser.runtime.sendMessage({ type: 'blockedOrigins' });
+  } catch (err) {
+    return;
+  }
+
+  const origins = (resp && resp.origins) || [];
+  const known = new Set(document.getElementById('allowedOrigins').value.split(/[\s,;]+/).filter(Boolean));
+  const свежие = origins.filter(o => !known.has(o));
+
+  if (свежие.length === 0) {
+    box.classList.add('hidden');
+    box.textContent = '';
+    return;
+  }
+
+  box.textContent = '';
+  const заголовок = document.createElement('div');
+  заголовок.innerHTML = '<strong>Эти страницы просили доступ, и он был отклонён.</strong> '
+    + 'Разрешайте только свой Planning Poker.';
+  box.appendChild(заголовок);
+
+  for (const origin of свежие) {
+    const row = document.createElement('div');
+    row.className = 'blocked-origin-row';
+
+    const name = document.createElement('span');
+    name.className = 'blocked-origin-name';
+    // textContent, а не innerHTML: адрес приходит со стороны и в разметку не вставляется
+    name.textContent = origin;
+    row.appendChild(name);
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-primary';
+    btn.textContent = 'Разрешить';
+    btn.addEventListener('click', () => allowOrigin(origin));
+    row.appendChild(btn);
+
+    box.appendChild(row);
+  }
+  box.classList.remove('hidden');
+}
+
+// Добавляет адрес в список и сразу сохраняет — иначе кнопка обещала бы больше, чем делает.
+// Сохраняем только список адресов: разрешить адрес можно и до того, как заполнены
+// адрес Jira с токеном, а общее сохранение без них отказывает.
+async function allowOrigin(origin) {
+  const field = document.getElementById('allowedOrigins');
+  const строки = field.value.split(/\n/).map(s => s.trim()).filter(Boolean);
+  if (!строки.includes(origin)) строки.push(origin);
+  field.value = строки.join('\n');
+
+  const resp = await browser.runtime.sendMessage({ type: 'saveSettings', allowedOrigins: field.value });
+  if (!resp || !resp.ok) {
+    showStatus('connectionStatus', 'Не удалось сохранить список адресов', 'error');
+    return;
+  }
+  await loadSettings();
+  await showBlockedOrigins();
+  showStatus('connectionStatus', `Адрес ${origin} разрешён. Обновите страницу Planning Poker.`, 'success');
+}
+
 // Показать инструкцию для браузера
 function showBrowserInstruction() {
   const noteEl = document.getElementById('browserNote');
@@ -111,7 +180,14 @@ async function saveSettings() {
     if (!resp || !resp.ok) throw new Error((resp && resp.error) || 'нет ответа');
     // Показываем разобранный список: опечатку в адресе видно сразу, а не при отказе
     await loadSettings();
-    showStatus('connectionStatus', 'Настройки сохранены!', 'success');
+    await showBlockedOrigins();
+
+    const выброшено = resp.droppedOrigins || [];
+    if (выброшено.length > 0) {
+      showStatus('connectionStatus', `Сохранено, но не понял адрес: ${выброшено.join(', ')}`, 'error');
+    } else {
+      showStatus('connectionStatus', 'Настройки сохранены!', 'success');
+    }
   } catch (err) {
     showStatus('connectionStatus', `Ошибка сохранения: ${err.message}`, 'error');
   }
@@ -331,6 +407,7 @@ document.addEventListener('DOMContentLoaded', () => {
   browserType = detectBrowser();
   showBrowserInstruction();
   showVersion();
+  showBlockedOrigins();
   
   // Загрузить сохраненные настройки
   loadSettings();

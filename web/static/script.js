@@ -1126,8 +1126,12 @@ function updateTaskDescriptionWithJira(description, linked = []) {
 }
 
 async function jiraSendEstimate() {
+    // Настройки могли появиться после загрузки страницы — переспрашиваем расширение,
+    // прежде чем отказать. Иначе отказ был окончательным до перезагрузки вкладки.
+    if (!jiraSettings.configured) await jiraRefreshSettings();
+
     if (!jiraSettings.configured || !jiraSettings.storyPointsField) {
-        toast.warning('Сначала настройте Jira в ⚡ JIRA');
+        toast.warning(jiraAccessError || 'Сначала укажите адрес Jira, токен и поле Story Points');
         toggleJiraPanel();
         return;
     }
