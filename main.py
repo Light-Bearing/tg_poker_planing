@@ -4,7 +4,7 @@ import threading
 import uvicorn
 from telegram import Update
 
-from config import DB_PATH, PORT, PROXY_URL, TOKEN, URL
+from config import DB_PATH, PORT, PROXY_URL, URL
 from telegram_bot import create_telegram_app
 
 
