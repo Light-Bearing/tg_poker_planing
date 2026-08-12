@@ -146,12 +146,22 @@ function isAllowedOrigin(origin, allowed) {
 }
 
 // Адреса, которым отказали. Нужны popup, чтобы предложить их кнопкой.
+//
+// Хранятся в storage, а не в памяти: в Chrome MV3 фоновый скрипт — service worker,
+// он засыпает через полминуты простоя и теряет всё, что не записано. Список,
+// собранный при загрузке страницы, к моменту открытия popup исчезал, и кнопки
+// «Разрешить» владелец не видел вовсе.
 const BLOCKED_ORIGINS_LIMIT = 5;
-let blockedOrigins = [];
 
-function rememberBlockedOrigin(origin) {
+function mergeBlockedOrigin(previous, origin) {
+    return [origin, ...(previous || []).filter(o => o !== origin)].slice(0, BLOCKED_ORIGINS_LIMIT);
+}
+
+async function rememberBlockedOrigin(origin) {
     if (!origin) return;
-    blockedOrigins = [origin, ...blockedOrigins.filter(o => o !== origin)].slice(0, BLOCKED_ORIGINS_LIMIT);
+    const stored = await storageGet(['blockedOrigins']);
+    const next = mergeBlockedOrigin(stored && stored.blockedOrigins, origin);
+    await storage.local.set({ blockedOrigins: next });
 }
 
 // Чтение хранилища одинаково в обоих браузерах: browser.* отвечает промисом,
@@ -574,7 +584,9 @@ const HANDLERS = {
 
     // Адреса, которым отказали. Только для popup: странице знать чужие адреса незачем.
     async blockedOrigins(_message, fromPopup) {
-        return { ok: true, origins: fromPopup ? blockedOrigins.slice() : [] };
+        if (!fromPopup) return { ok: true, origins: [] };
+        const stored = await storageGet(['blockedOrigins']);
+        return { ok: true, origins: (stored && stored.blockedOrigins) || [] };
     },
 
     async testConnection(message, fromPopup) {
@@ -645,6 +657,6 @@ if (typeof module !== 'undefined' && module.exports) {
         jiraOriginPattern, isOwnRequest, withoutOriginHeaders,
         jiraAuth, jiraOriginValue, probeMode, applyHeaderMode, PROBE_HEADER,
         normalizeOrigin, parseAllowedOrigins, parseAllowedOriginsDetailed, guessScheme,
-        isPageSender, senderOrigin, isAllowedOrigin, ORIGIN_NOT_ALLOWED,
+        isPageSender, senderOrigin, isAllowedOrigin, ORIGIN_NOT_ALLOWED, mergeBlockedOrigin,
     };
 }

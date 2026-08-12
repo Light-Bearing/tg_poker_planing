@@ -132,3 +132,25 @@ test('случайное слово доменом не становится', (
     assert.strictEqual(normalizeOrigin('jira:8080'), 'https://jira:8080');
     assert.strictEqual(normalizeOrigin('http://myhost'), 'http://myhost');
 });
+
+// --- Память об отклонённых адресах ---
+
+const { mergeBlockedOrigin } = require('../../browser-extension/background.js');
+
+test('последний отклонённый адрес идёт первым и не повторяется', () => {
+    let список = mergeBlockedOrigin([], 'http://a');
+    список = mergeBlockedOrigin(список, 'http://b');
+    список = mergeBlockedOrigin(список, 'http://a');
+    assert.deepStrictEqual(список, ['http://a', 'http://b']);
+});
+
+test('список ограничен пятью адресами', () => {
+    let список = [];
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) список = mergeBlockedOrigin(список, `http://${n}`);
+    assert.strictEqual(список.length, 5);
+    assert.strictEqual(список[0], 'http://7');
+});
+
+test('пустой прежний список не роняет слияние', () => {
+    assert.deepStrictEqual(mergeBlockedOrigin(undefined, 'http://a'), ['http://a']);
+});

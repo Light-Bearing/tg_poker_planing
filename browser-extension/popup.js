@@ -3,22 +3,29 @@
 
 let browserType = 'unknown';
 
-// Определить тип браузера
+// Определить тип браузера по схеме собственного адреса расширения.
+//
+// Прежняя проверка смотрела на наличие глобального browser — и всегда говорила
+// «Firefox», в том числе в Chrome: browser там создаёт browser-polyfill.min.js,
+// подключённый к этому же popup. Проверка опровергала сама себя.
+//
+// Схема адреса подделке не поддаётся: moz-extension:// в Firefox,
+// chrome-extension:// в Chrome и других Chromium.
+function browserTypeFromUrl(url) {
+  const text = String(url || '');
+  if (text.startsWith('moz-extension://')) return 'firefox';
+  if (text.startsWith('chrome-extension://')) return 'chrome';
+  return 'unknown';
+}
+
 function detectBrowser() {
-  if (typeof chrome !== 'undefined' && chrome.runtime) {
-    if (typeof browser !== 'undefined') {
-      // Firefox (с polyfill)
-      browserType = 'firefox';
-    } else if (chrome.runtime.getManifest && chrome.runtime.getManifest().manifest_version === 3) {
-      // Chrome Manifest V3
-      browserType = 'chrome';
-    } else {
-      // Chrome Manifest V2 или другой
-      browserType = 'chrome';
-    }
-  } else if (typeof browser !== 'undefined') {
-    // Firefox нативный
-    browserType = 'firefox';
+  const runtime = (typeof browser !== 'undefined' && browser.runtime)
+    ? browser.runtime
+    : (typeof chrome !== 'undefined' ? chrome.runtime : null);
+  try {
+    browserType = browserTypeFromUrl(runtime && runtime.getURL(''));
+  } catch (e) {
+    browserType = 'unknown';
   }
   return browserType;
 }
@@ -401,8 +408,10 @@ function showStatus(elementId, message, type) {
   el.classList.remove('hidden');
 }
 
-// Event listeners
-document.addEventListener('DOMContentLoaded', () => {
+// Event listeners. Условие нужно юнит-тестам: в Node документа нет, и файл
+// загружается только ради чистых функций.
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
   // Определить браузер и показать инструкцию
   browserType = detectBrowser();
   showBrowserInstruction();
@@ -418,4 +427,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('testConnection').addEventListener('click', testConnection);
   document.getElementById('runDiagnose').addEventListener('click', runDiagnose);
   document.getElementById('loadFields').addEventListener('click', loadFields);
-});
+  });
+}
+
+// Экспорт для юнит-тестов: в браузере module не определён, ветка не выполняется
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { browserTypeFromUrl };
+}
