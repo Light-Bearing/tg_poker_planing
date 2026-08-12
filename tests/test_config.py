@@ -39,3 +39,16 @@ def test_missing_token_via_subprocess():
     )
     assert result.returncode != 0
     assert "TELEGRAM BOT TOKEN NOT FOUND" in result.stderr
+
+
+def test_httpx_не_пишет_запросы_в_лог():
+    """Токен Telegram лежит в пути запроса, а httpx на INFO печатает путь целиком.
+
+    Проверялось на живом стенде: в логах контейнера оказался рабочий токен
+    строкой .../bot<TOKEN>/getUpdates, и так при каждом опросе.
+    """
+    import logging
+
+    import config  # noqa: F401  — уровень выставляется при импорте
+
+    assert logging.getLogger("httpx").level >= logging.WARNING

@@ -40,4 +40,10 @@ if not TOKEN:
     )
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+
+# httpx на уровне INFO пишет каждый запрос целиком, а у Telegram токен лежит прямо
+# в пути: .../bot<TOKEN>/getUpdates. При опросе это раз в несколько секунд кладёт
+# рабочий токен в логи контейнера, доступные любому, кто дотянулся до сервера.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
