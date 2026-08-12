@@ -388,6 +388,24 @@ class TestCreateTelegramApp:
             app = create_telegram_app(use_proxy=True)
             assert app is not None
 
+    def test_режим_опроса_получает_updater(self):
+        # run_polling без Updater падает с «Application.run_polling is only available
+        # if the application has an Updater», и бот молча не поднимается
+        with patch("telegram_bot.TOKEN", "fake_token"), patch("telegram_bot.PROXY_URL", None):
+            app = create_telegram_app(use_proxy=False, with_updater=True)
+            assert app.updater is not None
+
+    def test_режим_webhook_остаётся_без_updater(self):
+        with patch("telegram_bot.TOKEN", "fake_token"), patch("telegram_bot.PROXY_URL", None):
+            assert create_telegram_app(use_proxy=False, with_updater=False).updater is None
+            # Значение по умолчанию — тоже без Updater
+            assert create_telegram_app(use_proxy=False).updater is None
+
+    def test_updater_совместим_с_прокси(self):
+        with patch("telegram_bot.TOKEN", "fake_token"), patch("telegram_bot.PROXY_URL", "http://proxy:8080"):
+            app = create_telegram_app(use_proxy=True, with_updater=True)
+            assert app.updater is not None
+
     def test_app_has_handlers(self):
         with patch("telegram_bot.TOKEN", "fake_token"), patch("telegram_bot.PROXY_URL", None):
             app = create_telegram_app(use_proxy=False)

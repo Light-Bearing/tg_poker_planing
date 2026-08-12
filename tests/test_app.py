@@ -778,3 +778,47 @@ class TestRateLimitEviction:
 
         assert "ip:9.9.9.9" in web_api._rate_limit_store
         reset_rate_limits()
+
+
+class TestPollingThread:
+    """Поток опроса.
+
+    Оба дефекта проявились только на сервере: веб-часть была healthy, а бот молча
+    не работал. Тесты закрывают ровно их.
+    """
+
+    def test_опрос_запускается_без_обработчиков_сигналов(self):
+        # Их умеет вешать только главный поток; по умолчанию run_polling пытается,
+        # получает ValueError, и поток тихо умирает
+        from main import run_telegram_bot_thread
+
+        app = MagicMock()
+        run_telegram_bot_thread(app)
+        assert app.run_polling.call_args.kwargs["stop_signals"] is None
+
+    def test_режим_опроса_просит_приложение_с_updater(self):
+        import asyncio as _asyncio
+
+        from main import main as main_fn
+
+        starlette_app = MagicMock()
+        starlette_app.state = MagicMock()
+        telegram_app = MagicMock()
+        telegram_app.stop = AsyncMock()
+        telegram_app.shutdown = AsyncMock()
+
+        with (
+            patch("main.URL", None),
+            patch("main.PROXY_URL", None),
+            patch("main.check_telegram_direct", return_value=True),
+            patch("app.build_app", return_value=starlette_app),
+            patch("main.create_telegram_app", return_value=telegram_app) as create,
+            patch("main.print"),
+            patch("main.threading.Thread"),
+            patch("main.uvicorn.Config"),
+            patch("main.uvicorn.Server") as server,
+        ):
+            server.return_value.serve = AsyncMock()
+            _asyncio.run(main_fn())
+
+        assert create.call_args.kwargs["with_updater"] is True

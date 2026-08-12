@@ -38,13 +38,23 @@ async def check_telegram_direct() -> bool:
 def run_telegram_bot_thread(app):
     try:
         print("🤖 Starting Telegram bot polling in separate thread...")
-        app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, close_loop=True)
+        # stop_signals=None обязателен: по умолчанию run_polling вешает обработчики
+        # сигналов, а это умеет только главный поток — иначе ValueError и бот молча
+        # не поднимается, пока веб-часть выглядит здоровой.
+        app.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            close_loop=True,
+            stop_signals=None,
+        )
     except Exception as e:
         print(f"❌ Telegram bot thread error: {e}")
 
 
 async def main():
-    print(f"✅ Bot token loaded: {TOKEN[:10]}...{TOKEN[-5:]}")
+    # Куски токена в лог не печатаем: логи контейнера читает кто угодно с доступом
+    # к серверу, а по началу видно ещё и идентификатор бота.
+    print("✅ Bot token loaded")
     print(f"📁 Database path: {DB_PATH}")
     print(f"🌐 Web server port: {PORT}")
     if PROXY_URL:
@@ -72,7 +82,7 @@ async def main():
     is_webhook_mode = URL and URL != "https://your-domain.com"
     if is_webhook_mode:
         print("🌐 Starting in WEBHOOK mode...")
-        telegram_app = create_telegram_app(use_proxy)
+        telegram_app = create_telegram_app(use_proxy, with_updater=False)
         await telegram_app.initialize()
         await telegram_app.start()
         await telegram_app.bot.set_webhook(
@@ -80,8 +90,8 @@ async def main():
         )
         starlette_app.state.telegram_app = telegram_app
     else:
-        print("🔄 Starting in POLLING mode (local development)...")
-        telegram_app = create_telegram_app(use_proxy)
+        print("🔄 Starting in POLLING mode...")
+        telegram_app = create_telegram_app(use_proxy, with_updater=True)
         starlette_app.state.telegram_app = telegram_app
         threading.Thread(
             target=run_telegram_bot_thread, args=(telegram_app,), daemon=True, name="TelegramBotThread"

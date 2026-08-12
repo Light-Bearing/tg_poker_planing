@@ -166,20 +166,25 @@ async def handle_operation_click(query, data, chat_id):
             raise e
 
 
-def create_telegram_app(use_proxy: bool):
+def create_telegram_app(use_proxy: bool, with_updater: bool = False):
+    """Собирает приложение бота.
+
+    with_updater решает, будет ли у приложения Updater. Он нужен только режиму
+    опроса: run_polling без него падает с «Application.run_polling is only available
+    if the application has an Updater». Режиму webhook он, наоборот, лишний —
+    обновления приходят запросом, и незанятый Updater только держал бы ресурсы.
+    """
+    builder = Application.builder().token(TOKEN)
+
     if use_proxy and PROXY_URL:
         from telegram.request import HTTPXRequest
 
-        app = (
-            Application.builder()
-            .token(TOKEN)
-            .request(HTTPXRequest(proxy=PROXY_URL))
-            .get_updates_request(HTTPXRequest(proxy=PROXY_URL))
-            .updater(None)
-            .build()
-        )
-    else:
-        app = Application.builder().token(TOKEN).updater(None).build()
+        builder = builder.request(HTTPXRequest(proxy=PROXY_URL)).get_updates_request(HTTPXRequest(proxy=PROXY_URL))
+
+    if not with_updater:
+        builder = builder.updater(None)
+
+    app = builder.build()
     app.add_handler(CommandHandler(["start", "help"], start_command))
     app.add_handler(CommandHandler(["poker", "p"], poker_command))
     app.add_handler(MessageHandler(filters.Regex(r"^(/покер|/п|/зщлук|/з)"), russian_poker_command))
