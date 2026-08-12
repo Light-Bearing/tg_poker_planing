@@ -12,8 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копирование остального кода
 COPY . .
 
-# Создание непривилегированного пользователя
-RUN adduser -D myuser
+# Создание непривилегированного пользователя.
+# Каталог /data создаётся здесь же и с этим владельцем: docker переносит владельца
+# на новый именованный том, а иначе том достался бы root и база не создалась бы.
+RUN adduser -D myuser && mkdir -p /data && chown myuser:myuser /data
 USER myuser
 
 # Expose порт

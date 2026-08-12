@@ -1,0 +1,39 @@
+# Развёртывание на своём сервере.
+#
+# Токен бота берётся из файла .env рядом с этим файлом — в репозиторий он не
+# попадает и в образ не запекается. Шаблон: .env.example.
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# Порт наружу задаётся переменной PP_PORT (по умолчанию 8000): на сервере,
+# где уже что-то слушает, менять его в .env, а не здесь.
+
+services:
+  poker:
+    build: .
+    image: tg-poker-planing:latest
+    container_name: tg-poker-planing
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # База внутри тома, а не в /tmp: пользовательские шкалы переживают перезапуск.
+      # Веб-сессии удаляются по своему правилу и от этого не зависят.
+      PP_BOT_DB_PATH: /data/pp.db
+      PORT: 8000
+      # Публичный стенд: осиротевшая комната должна исчезать быстро, а не через
+      # 5-15 минут. Уборщик ходит раз в минуту, TTL прежний.
+      SESSION_CLEANUP_INTERVAL: 60
+    ports:
+      - "${PP_PORT:-8000}:8000"
+    volumes:
+      - poker-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthcheck').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  poker-data:
