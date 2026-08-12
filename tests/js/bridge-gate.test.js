@@ -104,6 +104,38 @@ test('popup работает всегда — у его сообщений не�
     assert.ok(!('error' in resp));
 });
 
+test('сохранение из popup не стирает поля, заданные на странице', async () => {
+    // Настройки пишут двое: popup владеет адресом и токеном, страница — фильтром
+    // и полями. Пока saveSettings писал все ключи подряд, каждый затирал чужое:
+    // владелец задавал поле Story Points на странице, жал «Сохранить» в popup —
+    // и поле обнулялось.
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+    await ask({ type: 'saveSettings', jiraFilter: 'project = X', storyPointsField: 'customfield_10016' }, APP);
+
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken }, POPUP);
+
+    assert.strictEqual(store.jiraFilter, 'project = X');
+    assert.strictEqual(store.storyPointsField, 'customfield_10016');
+});
+
+test('сохранение со страницы не стирает адрес и токен', async () => {
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+    await ask({ type: 'saveSettings', jiraFilter: 'project = X' }, APP);
+
+    assert.strictEqual(store.jiraUrl, 'https://jira.example.ru');
+    assert.strictEqual(store.jiraToken, 'SECRET-TOKEN-123');
+});
+
+test('пустое значение стирает поле осознанно — если его прислали', async () => {
+    // Отличать «ключа нет» от «ключ пустой» обязательно: иначе очистить фильтр
+    // станет нельзя
+    await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
+    await ask({ type: 'saveSettings', jiraFilter: 'project = X' }, APP);
+    await ask({ type: 'saveSettings', jiraFilter: '' }, APP);
+
+    assert.strictEqual(store.jiraFilter, '');
+});
+
 test('учётные данные для запроса берутся из хранилища, а не из сообщения страницы', async () => {
     await ask({ type: 'saveSettings', jiraUrl: store.jiraUrl, jiraToken: store.jiraToken, allowedOrigins: 'https://planning.example.ru' }, POPUP);
 

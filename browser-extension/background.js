@@ -469,22 +469,32 @@ async function jiraFetch(creds, path, { method = 'GET', body = null } = {}) {
 }
 
 const HANDLERS = {
+    // Сохранение частичное: пишутся только те ключи, что реально пришли в сообщении.
+    // Писателей двое — popup владеет адресом и токеном, страница фильтром и полями, —
+    // и при сплошной перезаписи каждый затирал чужое: владелец выбирал поле Story Points
+    // на странице, жал «Сохранить» в popup, и поле обнулялось.
+    // Присланное пустое значение при этом стирает поле: иначе очистить фильтр стало бы
+    // нельзя. Отличаем «ключа нет» от «ключ пустой», а не по истинности значения.
     async saveSettings(message, fromPopup) {
-        const settings = {
-            jiraFilter: message.jiraFilter,
-            storyPointsField: message.storyPointsField,
-            epicLinkField: message.epicLinkField || '',
+        const settings = {};
+        const take = (key) => {
+            if (key in message) settings[key] = message[key];
         };
+        take('jiraFilter');
+        take('storyPointsField');
+        take('epicLinkField');
+
         // Адрес Jira, токен и список разрешённых адресов принимаются только из popup
         if (fromPopup) {
-            settings.jiraUrl = message.jiraUrl;
-            settings.jiraToken = message.jiraToken;
+            take('jiraUrl');
+            take('jiraToken');
             if ('allowedOrigins' in message) {
                 settings.allowedOrigins = parseAllowedOrigins(message.allowedOrigins);
             }
             // Хост Jira мог смениться — слушатель заголовков должен слушать новый
-            refreshOriginStrip(message.jiraUrl);
+            if ('jiraUrl' in message) refreshOriginStrip(message.jiraUrl);
         }
+
         await storage.local.set(settings);
         return { ok: true };
     },

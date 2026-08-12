@@ -132,7 +132,7 @@ let jiraSettings = JSON.parse(localStorage.getItem('pp_jira_settings') || '{}');
 // любая XSS на странице. Удаляем при первом же запуске новой версии.
 if (jiraSettings.jiraToken) {
     delete jiraSettings.jiraToken;
-    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+    jiraPersistSettings();
 }
 let jiraIssues = [];          // все задачи (включая эпики)
 let jiraEpics = [];           // только эпики (для совместимости)
@@ -229,12 +229,48 @@ function toggleJiraPanel() {
     panel.classList.toggle('hidden');
 
     if (!isOpen) {
+        // Настройки живут в расширении и могли поменяться, пока вкладка была открыта:
+        // владелец обычно настраивает popup уже после того, как открыл страницу.
+        // Без этого запроса признак configured остался бы снимком времени загрузки.
+        jiraRefreshSettings().then(renderJiraPanel);
         renderJiraPanel();
     } else {
         document.getElementById('jiraSettings').style.display = 'none';
         document.getElementById('jiraNoExt').style.display = 'block';
         document.getElementById('jiraSessionSection').style.display = 'none';
     }
+}
+
+// Забирает у расширения актуальные настройки: адрес Jira, фильтр, поля и признак
+// configured. Токена среди них нет — расширение его не отдаёт.
+//
+// Признак configured — факт о постороннем процессе, а не состояние страницы, поэтому
+// в localStorage он не сохраняется: протухший true врал бы так же, как протухший false.
+async function jiraRefreshSettings() {
+    if (!hasJiraExt()) return false;
+
+    const ext = await jiraSendMessage({ type: 'getSettings' });
+    if (!ext || ext.blocked || !ext.jiraUrl) return false;
+
+    const local = { ...jiraSettings };
+    jiraSettings = {
+        ...ext,
+        // Поля могло найти автоопределение и сохранить локально раньше, чем в расширение
+        storyPointsField: ext.storyPointsField || local.storyPointsField || '',
+        epicLinkField: ext.epicLinkField || local.epicLinkField || '',
+    };
+    if (jiraSettings.epicLinkField) {
+        jiraEpicLinkField = jiraSettings.epicLinkField;
+    }
+    jiraPersistSettings();
+    updateJiraHeaderBtn();
+    return Boolean(jiraSettings.configured);
+}
+
+// Сохраняет настройки страницы, кроме признака configured
+function jiraPersistSettings() {
+    const { configured, ...persistent } = jiraSettings;
+    localStorage.setItem('pp_jira_settings', JSON.stringify(persistent));
 }
 
 function renderJiraPanel() {
@@ -320,6 +356,10 @@ async function jiraTestConnection() {
     btn.textContent = '...';
     statusEl.className = 'jira-status';
 
+    // Подтянуть настройки перед проверкой: удавшееся подключение доказывает, что
+    // расширение настроено, и оставлять признак configured протухшим после этого нельзя
+    await jiraRefreshSettings();
+
     // Адрес и токен берёт background из своего хранилища — страница их не знает
     const resp = await jiraSendMessage({ type: 'testConnection' });
     if (resp.ok) {
@@ -347,7 +387,7 @@ async function jiraTestConnection() {
             if (select && select.value) {
                 jiraSettings.storyPointsField = select.value;
             }
-            localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+            jiraPersistSettings();
             jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
         }
         // Показываем дерево задач на экране входа
@@ -397,15 +437,15 @@ async function jiraSaveSettings() {
     const fieldSelect = document.getElementById('jiraFieldSelect');
     const fieldId = fieldSelect.value || '';
 
-    if (!jiraSettings.configured) {
-        toast.warning('Сначала укажите адрес Jira и токен в popup расширения');
+    if (!jiraSettings.configured && !await jiraRefreshSettings()) {
+        toast.warning(jiraAccessError || 'Сначала укажите адрес Jira и токен в popup расширения');
         return;
     }
 
     // Страница сохраняет только несекретное: фильтр и выбранные поля.
     // Адрес и токен живут в расширении, отсюда они не отправляются и не приходят.
     jiraSettings = { ...jiraSettings, jiraFilter: filter, storyPointsField: fieldId, epicLinkField: jiraEpicLinkField };
-    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+    jiraPersistSettings();
 
     const resp = await jiraSendMessage({
         type: 'saveSettings',
@@ -498,7 +538,7 @@ async function jiraAutoConnect() {
                         jiraEpicLinkField = epicField ? epicField.id : '';
                         jiraSettings.epicLinkField = jiraEpicLinkField;
                     }
-                    localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
+                    jiraPersistSettings();
                     // Синхронизируем поля с расширением, чтобы при след. загрузке не терялись
                     jiraSendMessage({ type: 'saveSettings', ...jiraSettings });
                 }
@@ -718,8 +758,10 @@ function selectJoinJiraIssue(el, key) {
 
 // ==================== JIRA ISSUES (внутри сессии) ====================
 async function jiraLoadIssues() {
-    if (!jiraSettings.configured) {
-        toast.warning('Сначала настройте Jira в ⚡ JIRA');
+    // Настройки могли появиться после загрузки страницы — спрашиваем расширение,
+    // прежде чем отказывать. Раньше отказ был окончательным до перезагрузки вкладки.
+    if (!jiraSettings.configured && !await jiraRefreshSettings()) {
+        toast.warning(jiraAccessError || 'Сначала укажите адрес Jira и токен в popup расширения');
         return;
     }
 
@@ -1944,34 +1986,18 @@ document.addEventListener('DOMContentLoaded', () => {
         showJiraJoinTree();
     } else {
         console.log('PP Jira Bridge extension detected');
-        jiraSendMessage({ type: 'getSettings' }).then((extSettings) => {
-            if (extSettings && extSettings.jiraUrl) {
-                // Мержим: расширение -> приоритет для адреса и фильтра,
-                // localStorage -> приоритет для полей (storyPointsField, epicLinkField),
-                // т.к. автообнаружение могло их сохранить локально, но не в расширение.
-                // Токена в extSettings нет: расширение его не отдаёт.
-                const localSettings = { ...jiraSettings };
-                jiraSettings = {
-                    ...extSettings,
-                    // Сохраняем поля, если они есть в локалке, но отсутствуют в расширении
-                    storyPointsField: extSettings.storyPointsField || localSettings.storyPointsField || '',
-                    epicLinkField: extSettings.epicLinkField || localSettings.epicLinkField || '',
-                };
-                localStorage.setItem('pp_jira_settings', JSON.stringify(jiraSettings));
-                if (jiraSettings.epicLinkField) {
-                    jiraEpicLinkField = jiraSettings.epicLinkField;
-                }
-                updateJiraHeaderBtn();
-                // Автоподключение с задержкой (даём service worker'у инициализироваться)
-                setTimeout(() => {
-                    if (!jiraConnected && !jiraAutoConnecting) {
-                        console.log('Jira: starting auto-connect (delayed after DOMContentLoaded)');
-                        jiraAutoConnect();
-                    }
-                }, JIRA_AUTO_CONNECT_DELAY);
-            } else {
+        jiraRefreshSettings().then((configured) => {
+            if (!configured) {
                 showJiraJoinTree();
+                return;
             }
+            // Автоподключение с задержкой (даём service worker'у инициализироваться)
+            setTimeout(() => {
+                if (!jiraConnected && !jiraAutoConnecting) {
+                    console.log('Jira: starting auto-connect (delayed after DOMContentLoaded)');
+                    jiraAutoConnect();
+                }
+            }, JIRA_AUTO_CONNECT_DELAY);
         });
     }
     
