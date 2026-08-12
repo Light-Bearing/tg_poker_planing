@@ -38,6 +38,9 @@ async def check_telegram_direct() -> bool:
 def run_telegram_bot_thread(app):
     try:
         print("🤖 Starting Telegram bot polling in separate thread...")
+        # Свой цикл событий: run_polling берёт текущий через get_event_loop, а в
+        # неглавном потоке его нет — «There is no current event loop in thread».
+        asyncio.set_event_loop(asyncio.new_event_loop())
         # stop_signals=None обязателен: по умолчанию run_polling вешает обработчики
         # сигналов, а это умеет только главный поток — иначе ValueError и бот молча
         # не поднимается, пока веб-часть выглядит здоровой.

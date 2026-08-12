@@ -796,6 +796,31 @@ class TestPollingThread:
         run_telegram_bot_thread(app)
         assert app.run_polling.call_args.kwargs["stop_signals"] is None
 
+    def test_в_потоке_поднимается_свой_цикл_событий(self):
+        # run_polling берёт текущий цикл через get_event_loop, а в неглавном потоке
+        # его нет. Проверяем изнутри вызова — там, где библиотека и спотыкалась.
+        import asyncio as _asyncio
+        import threading as _threading
+
+        from main import run_telegram_bot_thread
+
+        seen = {}
+
+        def check(**_kwargs):
+            try:
+                seen["loop"] = _asyncio.get_event_loop()
+            except RuntimeError as err:
+                seen["error"] = str(err)
+
+        app = MagicMock()
+        app.run_polling.side_effect = check
+        thread = _threading.Thread(target=run_telegram_bot_thread, args=(app,))
+        thread.start()
+        thread.join(timeout=10)
+
+        assert "error" not in seen, seen.get("error")
+        assert seen.get("loop") is not None
+
     def test_режим_опроса_просит_приложение_с_updater(self):
         import asyncio as _asyncio
 
