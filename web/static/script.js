@@ -3011,8 +3011,7 @@ async function leaveSession() {
     document.getElementById('joinScreen').classList.remove('hidden');
     document.getElementById('sessionScreen').classList.add('hidden');
     document.getElementById('leaveBtn').classList.add('hidden');
-    document.getElementById('newTaskForm').classList.remove('active');
-    
+
     // ✅ НОВОЕ: Очищаем форму подключения
     document.getElementById('sessionId').value = '';
     document.getElementById('taskText').value = '';

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from contextlib import suppress
 
@@ -42,6 +43,55 @@ async def check_auto_reveal(session_id: str, game):
 
         # Отправляем обновление всем
         await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
+
+
+# Сколько ждать возвращения создателя, прежде чем отдать роль другому.
+#
+# Уход и перезагрузка страницы для сервера выглядят одинаково: сокет закрылся.
+# Без отсрочки обычный F5 навсегда отнимал у создателя управление собственной
+# комнатой, причём молча. Полминуты переживают перезагрузку и короткий обрыв,
+# но не дают комнате остаться без ведущего, если человек ушёл насовсем.
+INITIATOR_GRACE_SECONDS = 30.0
+
+# Отложенные переносы: (session_id, username) -> задача
+_pending_transfers: dict[tuple[str, str], asyncio.Task] = {}
+
+
+def schedule_initiator_transfer(session_id: str, leaving_username: str) -> None:
+    """Откладывает перенос роли: вдруг человек просто перезагружает страницу."""
+    cancel_initiator_transfer(session_id, leaving_username)
+
+    async def _later():
+        try:
+            await asyncio.sleep(INITIATOR_GRACE_SECONDS)
+            await transfer_initiator_if_needed(session_id, leaving_username)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            _pending_transfers.pop((session_id, leaving_username), None)
+
+    _pending_transfers[(session_id, leaving_username)] = asyncio.create_task(_later())
+
+
+def cancel_initiator_transfer(session_id: str, username: str) -> None:
+    """Человек вернулся — отложенный перенос отменяется.
+
+    Отмена не имеет права ничего сломать: она вызывается посреди обработки join,
+    и если задача досталась от прежнего цикла событий, cancel() бросает «Event loop
+    is closed». Такое исключение стоило бы участнику всего входа в комнату.
+    """
+    task = _pending_transfers.pop((session_id, username), None)
+    if task and not task.done():
+        with suppress(Exception):
+            task.cancel()
+
+
+def reset_pending_transfers() -> None:
+    """Забывает отложенные переносы. Нужен тестам: задачи живут между ними."""
+    for task in _pending_transfers.values():
+        with suppress(Exception):
+            task.cancel()
+    _pending_transfers.clear()
 
 
 async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
@@ -94,7 +144,17 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
         session_id,
     )
 
-    await manager.broadcast(session_id, {"type": "update", "data": enrich_session_response(game, session_id)})
+    # Молчаливый перенос сбивает с толку обоих: прежний ведущий не понимает, куда
+    # делась панель управления, новый — откуда она взялась. Говорим вслух.
+    await manager.broadcast(
+        session_id,
+        {
+            "type": "initiator_changed",
+            "from_username": leaving_username,
+            "to_username": new_initiator_username,
+            "data": enrich_session_response(game, session_id),
+        },
+    )
 
 
 async def websocket_endpoint(websocket: WebSocket):
@@ -130,6 +190,8 @@ async def websocket_endpoint(websocket: WebSocket):
                             username = join_username
                             is_new = manager.register_user(session_id, username)
                             manager.register_ws_connection(session_id, username, websocket)
+                            # Вернулся — отложенный перенос роли отменяется
+                            cancel_initiator_transfer(session_id, username)
                             if game:
                                 # При reconnect отправляем текущее состояние
                                 current_data = enrich_session_response(game, session_id)
@@ -186,23 +248,19 @@ async def websocket_endpoint(websocket: WebSocket):
                             elif target_username == kicker_username:
                                 await websocket.send_json({"type": "error", "message": "Нельзя исключить себя"})
                             else:
-                                # Send "kicked" message to the kicked user
-                                kicked_ws = manager.get_ws_by_username(session_id, target_username)
-                                if kicked_ws:
-                                    with suppress(Exception):
-                                        await kicked_ws.send_json(
-                                            {
-                                                "type": "kicked",
-                                                "message": f"Вы были исключены инициатором {kicker_username}",
-                                            }
-                                        )
+                                # Сообщаем и закрываем все вкладки исключённого:
+                                # с одной он остался бы в комнате в другой
+                                await manager.notify_and_close(
+                                    session_id,
+                                    target_username,
+                                    {
+                                        "type": "kicked",
+                                        "message": f"Вы были исключены инициатором {kicker_username}",
+                                    },
+                                )
 
                                 # kick_user сам чистит все трекеры
                                 if manager.kick_user(session_id, target_username):
-                                    if kicked_ws:
-                                        with suppress(Exception):
-                                            await kicked_ws.close(1000)
-
                                     updated_data = enrich_session_response(game, session_id)
                                     await manager.broadcast(
                                         session_id,
@@ -233,11 +291,15 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket, username, game)
         if username:
-            manager.unregister_ws_connection(session_id, username)
-            await transfer_initiator_if_needed(session_id, username)
+            manager.unregister_ws_connection(session_id, username, websocket)
+            # Не отнимаем роль сразу: за отключением может стоять обычная перезагрузка
+            if not manager.is_ws_connected(session_id, username):
+                schedule_initiator_transfer(session_id, username)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(session_id, websocket, username, game)
         if username:
-            manager.unregister_ws_connection(session_id, username)
-            await transfer_initiator_if_needed(session_id, username)
+            manager.unregister_ws_connection(session_id, username, websocket)
+            # Не отнимаем роль сразу: за отключением может стоять обычная перезагрузка
+            if not manager.is_ws_connected(session_id, username):
+                schedule_initiator_transfer(session_id, username)

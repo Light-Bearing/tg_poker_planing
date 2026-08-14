@@ -1,3 +1,4 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -5,13 +6,22 @@ import pytest
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 import state
+from config import WEB_CHAT_ID
 from connection import manager
-from ppbot.game import GameRegistry
-from websocket_handler import transfer_initiator_if_needed, websocket_endpoint
+from ppbot.game import GameRegistry, Initiator
+from websocket_handler import (
+    cancel_initiator_transfer,
+    reset_pending_transfers,
+    schedule_initiator_transfer,
+    transfer_initiator_if_needed,
+    websocket_endpoint,
+)
 
 
 @pytest.fixture(autouse=True)
 def _reset_manager():
+    # Отложенные переносы роли живут между тестами и цепляются за прежний цикл событий
+    reset_pending_transfers()
     manager.active_connections.clear()
     manager.session_users.clear()
     manager.ws_username_map.clear()
@@ -58,12 +68,15 @@ class TestWsUsernameMap:
         manager.register_ws_connection("s1", "alice", ws)
         assert manager.get_ws_by_username("s1", "alice") is ws
 
-    def test_register_ws_connection_overwrites_old_ws(self):
+    def test_второе_подключение_не_вытесняет_первое(self):
+        # Прежде второй сокет затирал первый, и человек с двумя вкладками одной
+        # комнаты присутствовал в учёте лишь наполовину. Теперь хранятся оба.
         old_ws = MagicMock()
         new_ws = MagicMock()
         manager.register_ws_connection("s1", "alice", old_ws)
         manager.register_ws_connection("s1", "alice", new_ws)
-        assert manager.get_ws_by_username("s1", "alice") is new_ws
+        assert set(manager.get_all_ws_by_username("s1", "alice")) == {old_ws, new_ws}
+        assert manager.get_ws_by_username("s1", "alice") in (old_ws, new_ws)
 
     def test_unregister_ws_connection_removes_user(self):
         manager.register_ws_connection("s1", "alice", MagicMock())
@@ -615,8 +628,12 @@ class TestWebSocketEndpoint:
         manager.register_user("test-session", "bob")
         manager.register_ws_connection("test-session", "bob", bob_ws)
 
-        # alice connects and triggers exception
-        await websocket_endpoint(alice_ws)
+        # alice connects and triggers exception.
+        # Отсрочку обнуляем: перенос роли теперь откладывается, чтобы обычная
+        # перезагрузка страницы не отнимала комнату у создателя.
+        with patch("websocket_handler.INITIATOR_GRACE_SECONDS", 0):
+            await websocket_endpoint(alice_ws)
+            await asyncio.sleep(0.05)
 
         updated = await state.storage.get_game("web", "test-session")
         assert updated.initiator.id == "web_bob"
@@ -942,3 +959,126 @@ class TestWebSocketSetScale:
         assert errors, "не-инициатор должен получить сообщение об ошибке"
         saved = await state.storage.get_game("web", "test-session")
         assert saved.scale_name == "custom"
+
+
+class TestНесколькоВкладокОдногоЧеловека:
+    """Один человек — несколько сокетов.
+
+    Судья интерфейса воспроизвёл: открыть вторую вкладку той же комнаты и закрыть её —
+    в оставшейся, живой вкладке человек считается ушедшим. На экране это давало
+    «2 / 1 ПРОГОЛОСОВАЛО»: голосов больше, чем участников.
+    """
+
+    def test_закрытие_одной_вкладки_не_выключает_человека(self):
+        первая, вторая = MagicMock(), MagicMock()
+        manager.register_ws_connection("s1", "alice", первая)
+        manager.register_ws_connection("s1", "alice", вторая)
+
+        manager.unregister_ws_connection("s1", "alice", вторая)
+
+        assert manager.is_ws_connected("s1", "alice") is True
+
+    def test_закрытие_последней_вкладки_выключает(self):
+        первая, вторая = MagicMock(), MagicMock()
+        manager.register_ws_connection("s1", "alice", первая)
+        manager.register_ws_connection("s1", "alice", вторая)
+
+        manager.unregister_ws_connection("s1", "alice", вторая)
+        manager.unregister_ws_connection("s1", "alice", первая)
+
+        assert manager.is_ws_connected("s1", "alice") is False
+
+    async def test_disconnect_учитывает_оставшиеся_вкладки(self):
+        # disconnect вызывается раньше unregister и раньше тоже стирал человека целиком.
+        # Тест асинхронный: disconnect рассылает «участник вышел» через create_task
+        первая, вторая = AsyncMock(), AsyncMock()
+        await manager.connect("s1", первая)
+        await manager.connect("s1", вторая)
+        manager.register_ws_connection("s1", "alice", первая)
+        manager.register_ws_connection("s1", "alice", вторая)
+
+        manager.disconnect("s1", вторая, "alice")
+
+        assert manager.is_ws_connected("s1", "alice") is True
+
+    def test_все_сокеты_человека_доступны_для_исключения(self):
+        # Кик обязан закрыть все вкладки: иначе исключённый остаётся в комнате в другой
+        первая, вторая = MagicMock(), MagicMock()
+        manager.register_ws_connection("s1", "alice", первая)
+        manager.register_ws_connection("s1", "alice", вторая)
+
+        assert set(manager.get_all_ws_by_username("s1", "alice")) == {первая, вторая}
+
+    def test_неизвестное_имя_даёт_пустой_список(self):
+        assert manager.get_all_ws_by_username("s1", "нет такого") == []
+
+
+class TestОтсрочкаПереносаРоли:
+    """Перезагрузка страницы не должна отнимать комнату у создателя.
+
+    Судья интерфейса воспроизвёл: создатель нажал F5 — роль ведущего молча уехала
+    к следующему участнику, вернуть её нечем. Уход и перезагрузка выглядят для
+    сервера одинаково, различает их только время до возвращения.
+    """
+
+    async def test_перезагрузка_не_отнимает_роль(self, tmp_path):
+        game = state.storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("alice"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s1", "alice")
+        manager.register_user("s1", "bob")
+        manager.register_ws_connection("s1", "bob", MagicMock())
+
+        # Создатель отключился, и почти сразу вернулся — как при F5
+        schedule_initiator_transfer("s1", "alice")
+        manager.register_ws_connection("s1", "alice", MagicMock())
+        cancel_initiator_transfer("s1", "alice")
+        await asyncio.sleep(0)
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s1")
+        assert saved.initiator.id == "web_alice"
+
+    async def test_ушедший_насовсем_роль_отдаёт(self, tmp_path):
+        game = state.storage.new_game(WEB_CHAT_ID, "s2", Initiator.from_web("alice"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s2", "alice")
+        manager.register_user("s2", "bob")
+        manager.register_ws_connection("s2", "bob", MagicMock())
+
+        # Отсрочку обнуляем, чтобы не ждать в тесте
+        with patch("websocket_handler.INITIATOR_GRACE_SECONDS", 0):
+            schedule_initiator_transfer("s2", "alice")
+            await asyncio.sleep(0.05)
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s2")
+        assert saved.initiator.id == "web_bob"
+
+    async def test_возвращение_отменяет_даже_после_второго_отключения(self, tmp_path):
+        game = state.storage.new_game(WEB_CHAT_ID, "s3", Initiator.from_web("alice"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s3", "alice")
+        manager.register_user("s3", "bob")
+        manager.register_ws_connection("s3", "bob", MagicMock())
+
+        schedule_initiator_transfer("s3", "alice")
+        cancel_initiator_transfer("s3", "alice")
+        schedule_initiator_transfer("s3", "alice")
+        cancel_initiator_transfer("s3", "alice")
+        await asyncio.sleep(0.05)
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s3")
+        assert saved.initiator.id == "web_alice"
+
+    async def test_отмена_чужого_имени_не_спасает_роль(self, tmp_path):
+        game = state.storage.new_game(WEB_CHAT_ID, "s4", Initiator.from_web("alice"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s4", "alice")
+        manager.register_user("s4", "bob")
+        manager.register_ws_connection("s4", "bob", MagicMock())
+
+        with patch("websocket_handler.INITIATOR_GRACE_SECONDS", 0):
+            schedule_initiator_transfer("s4", "alice")
+            cancel_initiator_transfer("s4", "bob")  # вернулся не тот
+            await asyncio.sleep(0.05)
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s4")
+        assert saved.initiator.id == "web_bob"

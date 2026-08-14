@@ -54,8 +54,9 @@ class ConnectionManager:
                 self.active_connections[session_id].remove(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
-        if session_id in self.ws_username_map and username:
-            self.ws_username_map[session_id].discard(username)
+        if username:
+            # Не стираем человека, пока у него открыта хотя бы одна вкладка этой комнаты
+            self.unregister_ws_connection(session_id, username, websocket)
 
         # Notify remaining participants that this user left (с данными сессии)
         if username and session_id in self.active_connections:
@@ -114,10 +115,25 @@ class ConnectionManager:
             self.ws_username_map[session_id] = set()
             self._ws_connections[session_id] = {}
         self.ws_username_map[session_id].add(username)
-        self._ws_connections[session_id][username] = websocket
+        self._ws_connections[session_id].setdefault(username, set()).add(websocket)
 
-    def unregister_ws_connection(self, session_id: str, username: str):
-        """Remove user from active WS tracking (called on disconnect)."""
+    def unregister_ws_connection(self, session_id: str, username: str, websocket: WebSocket | None = None):
+        """Убирает сокет человека из учёта активных подключений.
+
+        У одного человека может быть несколько вкладок одной комнаты. Раньше закрытие
+        любой из них стирало его целиком, и в оставшейся, живой вкладке он числился
+        ушедшим: счётчик показывал больше голосов, чем участников. Поэтому имя
+        снимается только когда закрылся его последний сокет.
+
+        websocket=None снимает человека целиком — так поступают при исключении из
+        комнаты, когда закрываются все его вкладки разом.
+        """
+        sockets = self._ws_connections.get(session_id, {}).get(username)
+        if sockets is not None and websocket is not None:
+            sockets.discard(websocket)
+            if sockets:
+                return
+
         if session_id in self.ws_username_map:
             self.ws_username_map[session_id].discard(username)
             self._ws_connections[session_id].pop(username, None)
@@ -132,7 +148,30 @@ class ConnectionManager:
         return self.ws_username_map.get(session_id, set()).copy()
 
     def get_ws_by_username(self, session_id: str, username: str) -> WebSocket | None:
-        return self._ws_connections.get(session_id, {}).get(username)
+        """Любой из сокетов человека. Для рассылки по всем вкладкам — get_all_ws_by_username."""
+        sockets = self._ws_connections.get(session_id, {}).get(username)
+        return next(iter(sockets), None) if sockets else None
+
+    def get_all_ws_by_username(self, session_id: str, username: str) -> list[WebSocket]:
+        """Все вкладки человека. Исключение из комнаты обязано закрыть каждую."""
+        return list(self._ws_connections.get(session_id, {}).get(username, ()))
+
+    async def notify_and_close(self, session_id: str, username: str, message: dict) -> None:
+        """Сообщает человеку и закрывает все его вкладки этой комнаты.
+
+        Закрыть одну мало: исключённый остался бы в комнате в другой вкладке, а его
+        сокет — в active_connections, куда продолжала бы идти рассылка.
+        """
+        for websocket in self.get_all_ws_by_username(session_id, username):
+            with suppress(Exception):
+                await websocket.send_json(message)
+            with suppress(Exception):
+                await websocket.close(1000)
+            connections = self.active_connections.get(session_id)
+            if connections and websocket in connections:
+                connections.remove(websocket)
+        if session_id in self.active_connections and not self.active_connections[session_id]:
+            del self.active_connections[session_id]
 
     def kick_user(self, session_id: str, target_username: str) -> bool:
         """Remove a user from the session. Returns True if user was found and removed."""
