@@ -1666,7 +1666,7 @@ function renderCustomScaleEditorList() {
     const list = document.getElementById('scaleEditorList');
     if (!list) return;
     if (customScaleBuffer.length === 0) {
-        list.innerHTML = '<div class="scale-editor-empty">Нет значений. Добавьте хотя бы 2.</div>';
+        list.innerHTML = '<div class="scale-editor-empty">Нет значений. Добавьте не меньше шести.</div>';
         return;
     }
     list.innerHTML = customScaleBuffer.map((point, idx) => `
@@ -1677,12 +1677,23 @@ function renderCustomScaleEditorList() {
     `).join('');
 }
 
+// Те же правила, что и на сервере (web_api.SCALE_POINT_RE и MIN_SCALE_POINTS).
+// Держим их и здесь, чтобы отказ приходил в момент ввода, а не после того, как
+// человек набрал всю шкалу: раньше слишком длинное значение редактор молча
+// принимал, а сервер отвергал шкалу целиком — и по-английски.
+const SCALE_POINT_RE = /^[\p{L}\p{N}_.,:;!?+\-*/½∞❔☕ ]{1,8}$/u;
+const MIN_SCALE_POINTS = 8;
+
 function addCustomPoint() {
     const input = document.getElementById('scaleEditorNewPoint');
     const value = input.value.trim();
     if (!value) return;
     if (SPECIAL_POINTS.includes(value)) {
         toast.warning('❔ и ☕ добавляются автоматически');
+        return;
+    }
+    if (!SCALE_POINT_RE.test(value)) {
+        toast.warning('Значение: от 1 до 8 символов — буквы, цифры и . , : ; ! ? + - * /');
         return;
     }
     if (customScaleBuffer.includes(value)) {
@@ -1701,8 +1712,10 @@ function removeCustomPoint(idx) {
 }
 
 async function saveCustomScale() {
-    if (customScaleBuffer.length < 2) {
-        toast.warning('Добавьте хотя бы 2 значения');
+    // Сервер считает вместе с ❔ и ☕, поэтому свои значения — минимум MIN - 2
+    const нужноСвоих = MIN_SCALE_POINTS - SPECIAL_POINTS.length;
+    if (customScaleBuffer.length < нужноСвоих) {
+        toast.warning(`Нужно не меньше ${нужноСвоих} значений: сейчас ${customScaleBuffer.length}`);
         return;
     }
 
@@ -1730,8 +1743,11 @@ async function saveCustomScale() {
         if (typeof SERVER_SCALES !== 'undefined') {
             SERVER_SCALES.custom = data.points;
         }
-        // Refresh the preview
+        // Обновляем и значения, и сводку: раньше сетка уже показывала новую шкалу,
+        // а подпись рядом оставалась прежней — «Custom · 20 значений» при 28 картах
         renderScalePoints('custom');
+        // renderJoinScaleSelector заодно освежает открытое окно настроек
+        renderJoinScaleSelector();
         closeCustomScaleEditor();
         toast.success('Пользовательская шкала сохранена');
     } catch (error) {

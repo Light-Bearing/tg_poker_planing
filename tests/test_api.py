@@ -361,7 +361,7 @@ class TestCustomScale:
         assert data["available_points"] == points
 
 
-SCALE_POINT_ERROR = "Each point must be 1-8 characters: letters, digits, and . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+from web_api import SCALE_POINT_ERROR  # noqa: E402  — сообщение живёт на сервере
 
 
 class TestCustomScalePointValidation:
@@ -509,7 +509,7 @@ class TestAutoRevealApi:
 
 
 BAD_NAME = "<img src=x onerror=alert(1)>"
-NAME_ERROR = "Username must be 1-32 characters: letters, digits, spaces, - . _"
+from web_api import USERNAME_ERROR as NAME_ERROR  # noqa: E402 — текст живёт на сервере
 
 
 class TestUsernameValidation:
@@ -617,7 +617,7 @@ class TestВерсияСтатики:
         файл = "web/static/styles.css"
         отметка = os.stat(файл).st_mtime
         try:
-            os.utime(файл, (отметка + 10, отметка + 10))
+            os.utime(файл, (отметка + 10_000, отметка + 10_000))
             time.sleep(0.01)
             assert static_version() != было
         finally:
@@ -633,3 +633,50 @@ class TestВерсияСтатики:
         метка = static_version()
         assert f"/static/styles.css?v={метка}" in html
         assert f"/static/script.js?v={метка}" in html
+
+
+class TestСообщенияПоРусски:
+    """Сообщения об отказе видит человек, а интерфейс русский.
+
+    Судья интерфейса снял дословно: «✕ ОШИБКА At least 8 points are required
+    (standard scales have 8-12 points)» — английская строка посреди русского
+    интерфейса, да ещё и противоречащая подсказке над ней.
+    """
+
+    def test_порог_шкалы_совпадает_с_подсказкой_в_разметке(self):
+        from pathlib import Path
+
+        from web_api import MIN_SCALE_POINTS
+
+        # Подсказка обещает шесть своих значений плюс ❔ и ☕
+        разметка = Path("web/templates/index.html").read_text(encoding="utf-8")
+        assert "не меньше шести" in разметка
+        assert MIN_SCALE_POINTS == 8
+
+    def test_отказ_короткой_шкалы_по_русски(self, client):
+        resp = client.post("/api/custom-scale", json={"username": "alice", "points": ["1", "2", "3"]})
+        assert resp.status_code == 400
+        сообщение = resp.json()["error"]
+        assert "не меньше" in сообщение
+        assert not сообщение.isascii()
+
+    def test_отказ_недопустимого_значения_по_русски(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "alice", "points": ["1", "2", "3", "4", "5", "6", "СЛИШКОМ ДЛИННОЕ", "8"]},
+        )
+        assert resp.status_code == 400
+        assert not resp.json()["error"].isascii()
+
+    def test_отказ_повторов_по_русски(self, client):
+        resp = client.post(
+            "/api/custom-scale",
+            json={"username": "alice", "points": ["1", "1", "2", "3", "4", "5", "6", "7"]},
+        )
+        assert resp.status_code == 400
+        assert "повтор" in resp.json()["error"]
+
+    def test_отказ_плохого_имени_по_русски(self, client):
+        resp = client.post("/api/sessions", json={"username": "<script>", "text": "задача"})
+        assert resp.status_code == 400
+        assert not resp.json()["error"].isascii()

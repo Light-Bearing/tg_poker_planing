@@ -50,7 +50,7 @@ def evict_stale_rate_limits(window: float = 60.0) -> None:
 # дефис и точка. Всё остальное (< > " ' & перевод строки) отсекается, потому что
 # имя попадает в HTML и в JS-контекст на фронте.
 USERNAME_RE = re.compile(r"[\w \-.]{1,32}", re.UNICODE)
-USERNAME_ERROR = "Username must be 1-32 characters: letters, digits, spaces, - . _"
+USERNAME_ERROR = "Имя: от 1 до 32 символов — буквы, цифры, пробел, дефис, точка"
 
 
 def validate_username(raw: str) -> str | None:
@@ -66,7 +66,14 @@ def validate_username(raw: str) -> str | None:
 # в HTML на фронте. Разрешаем буквы любого алфавита, цифры и пунктуацию из
 # существующих шкал; < > " ' & ` и пустые значения отсекаются.
 SCALE_POINT_RE = re.compile(r"[\w.,:;!?+\-*/½∞❔☕ ]{1,8}", re.UNICODE)
-SCALE_POINT_ERROR = "Each point must be 1-8 characters: letters, digits, and . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+SCALE_POINT_ERROR = "Значение шкалы: от 1 до 8 символов — буквы, цифры и . , : ; ! ? + - * / ½ ∞ ❔ ☕"
+
+
+# Сколько значений должно остаться в шкале вместе с ❔ и ☕. Порог держим здесь,
+# чтобы фронт мог показать то же число в подсказке: раньше редактор обещал
+# «минимум 2 значения», а сервер отвечал отказом на всё, что меньше восьми.
+MIN_SCALE_POINTS = 8
+MIN_SCALE_POINTS_ERROR = f"В шкале должно быть не меньше {MIN_SCALE_POINTS} значений вместе с ❔ и ☕"
 
 
 def validate_scale_point(raw: str) -> str | None:
@@ -459,12 +466,12 @@ async def api_save_custom_scale(request: Request):
                 return JSONResponse({"error": SCALE_POINT_ERROR}, status_code=400)
             cleaned.append(point)
 
-        if len(cleaned) < 8:
+        if len(cleaned) < MIN_SCALE_POINTS:
             return JSONResponse(
-                {"error": "At least 8 points are required (standard scales have 8-12 points)"}, status_code=400
+                {"error": MIN_SCALE_POINTS_ERROR}, status_code=400
             )
         if len(cleaned) != len(set(cleaned)):
-            return JSONResponse({"error": "Duplicate points are not allowed"}, status_code=400)
+            return JSONResponse({"error": "Значения не должны повторяться"}, status_code=400)
 
         await state.storage.save_custom_scale(f"web_{username}", cleaned)
         return JSONResponse({"ok": True, "points": cleaned})
