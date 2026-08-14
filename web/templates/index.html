@@ -123,6 +123,13 @@
             </div>
         </div>
         
+        <!-- Связь потеряна окончательно: карты и кнопки при этом остаются нажимаемыми,
+             и без явного сообщения человек голосует в пустоту -->
+        <div id="reconnectFailed" class="reconnect-failed hidden" role="alert">
+            <span>Связь с комнатой потеряна — переподключиться не удалось.</span>
+            <button class="btn btn-primary" onclick="window.location.reload()">Обновить страницу</button>
+        </div>
+
         <!-- ==================== ЭКРАН СЕССИИ ==================== -->
         <div id="sessionScreen" class="hidden">
             <div class="main-content">

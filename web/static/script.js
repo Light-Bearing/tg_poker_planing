@@ -1669,12 +1669,28 @@ function renderCustomScaleEditorList() {
         list.innerHTML = '<div class="scale-editor-empty">Нет значений. Добавьте не меньше шести.</div>';
         return;
     }
+    // Стрелки нужны, потому что значения встают в порядке ввода: добавил 64, потом
+    // 48 — и карты голосования пойдут «…40, 64, 48…». Раньше поправить это можно
+    // было только снеся всё после ошибки и набив заново.
     list.innerHTML = customScaleBuffer.map((point, idx) => `
         <div class="scale-editor-item">
             <span class="scale-editor-item-value">${escapeHtml(point)}</span>
+            <button class="scale-editor-item-move" onclick="moveCustomPoint(${idx}, -1)"
+                    title="Сдвинуть ${escapeHtml(point)} влево" ${idx === 0 ? 'disabled' : ''}>↑</button>
+            <button class="scale-editor-item-move" onclick="moveCustomPoint(${idx}, 1)"
+                    title="Сдвинуть ${escapeHtml(point)} вправо" ${idx === customScaleBuffer.length - 1 ? 'disabled' : ''}>↓</button>
             <button class="scale-editor-item-remove" onclick="removeCustomPoint(${idx})" title="Удалить ${escapeHtml(point)}">✕</button>
         </div>
     `).join('');
+}
+
+// Сдвиг значения на одну позицию. shift = -1 к началу, +1 к концу.
+function moveCustomPoint(idx, shift) {
+    const цель = idx + shift;
+    if (цель < 0 || цель >= customScaleBuffer.length) return;
+    const [значение] = customScaleBuffer.splice(idx, 1);
+    customScaleBuffer.splice(цель, 0, значение);
+    renderCustomScaleEditorList();
 }
 
 // Те же правила, что и на сервере (web_api.SCALE_POINT_RE и MIN_SCALE_POINTS).
@@ -2163,20 +2179,56 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (state.username && sessionId) joinOrCreateSession();
     
-    // Escape closes modals; Enter submits new task
+    // Esc закрывает верхний из открытых слоёв, Enter подтверждает поле.
+    //
+    // Прежде Esc знал только два окна из пяти: окно выбора задачи, настройки шкалы
+    // и панель Jira приходилось закрывать мышью. Порядок здесь важен — закрываем
+    // тот слой, который лежит выше: редактор шкалы открывается поверх её настроек.
+    const слоиПоУбываниюГлубины = [
+        ['confirmModal', () => closeConfirmModal(false)],
+        ['scaleEditorModal', closeCustomScaleEditor],
+        ['scaleSettingsModal', closeScaleSettings],
+        ['newTaskModal', closeNewTaskModal],
+    ];
+
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            if (!document.getElementById('confirmModal').classList.contains('hidden')) {
-                closeConfirmModal(false);
-            } else if (!document.getElementById('scaleEditorModal').classList.contains('hidden')) {
-                closeCustomScaleEditor();
+            for (const [id, закрыть] of слоиПоУбываниюГлубины) {
+                const слой = document.getElementById(id);
+                if (слой && !слой.classList.contains('hidden')) {
+                    закрыть();
+                    return;
+                }
             }
+            const панель = document.getElementById('jiraPanel');
+            if (панель && !панель.classList.contains('hidden')) toggleJiraPanel();
+            return;
         }
+
         if (e.key === 'Enter' && !e.shiftKey) {
-            const input = document.getElementById('newTaskText');
-            if (input === document.activeElement && input.value.trim()) {
+            const активное = document.activeElement;
+
+            const новаяЗадача = document.getElementById('newTaskText');
+            if (активное === новаяЗадача && новаяЗадача.value.trim()) {
                 e.preventDefault();
                 startNewTask();
+                return;
+            }
+
+            // Экран входа: Enter в имени или в номере комнаты делает то же, что кнопка
+            const наЭкранеВхода = !document.getElementById('joinScreen').classList.contains('hidden');
+            if (наЭкранеВхода && (активное === document.getElementById('username')
+                                  || активное === document.getElementById('sessionId'))) {
+                e.preventDefault();
+                joinOrCreateSession();
+                return;
+            }
+
+            // Набивать шкалу по одному значению без Enter мучительно
+            const новоеЗначение = document.getElementById('scaleEditorNewPoint');
+            if (активное === новоеЗначение && новоеЗначение.value.trim()) {
+                e.preventDefault();
+                addCustomPoint();
             }
         }
     });
@@ -2371,6 +2423,18 @@ function enterSession(sessionId, session, isInitiator) {
     connectWebSocket(sessionId);
 }
 
+// Связь потеряна окончательно: говорим прямо и даём способ вернуться
+function showReconnectFailed() {
+    const баннер = document.getElementById('reconnectFailed');
+    if (баннер) баннер.classList.remove('hidden');
+    toast.error('Связь с комнатой потеряна. Обновите страницу, чтобы вернуться.', 'НЕТ СВЯЗИ');
+}
+
+function hideReconnectFailed() {
+    const баннер = document.getElementById('reconnectFailed');
+    if (баннер) баннер.classList.add('hidden');
+}
+
 function connectWebSocket(sessionId) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.ws = new WebSocket(`${protocol}//${window.location.host}/ws/${sessionId}`);
@@ -2378,6 +2442,7 @@ function connectWebSocket(sessionId) {
     updateConnectionStatus('connecting');
     state.ws.onopen = () => {
         updateConnectionStatus('connected');
+        hideReconnectFailed();
         state.reconnectAttempts = 0;
         state.ws.send(JSON.stringify({ type: 'join', username: state.username }));
         
@@ -2470,6 +2535,11 @@ function connectWebSocket(sessionId) {
                     connectWebSocket(state.sessionId);
                 }
             }, delay);
+        } else if (state.sessionId) {
+            // Попытки исчерпаны. Молчать здесь нельзя: карты и кнопки по-прежнему
+            // нажимаются, комната выглядит живой, а связи с ней нет — человек
+            // голосует в пустоту и узнаёт об этом в лучшем случае от соседа.
+            showReconnectFailed();
         }
     };
 }
