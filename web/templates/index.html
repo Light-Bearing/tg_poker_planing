@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Planning Poker</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◇</text></svg>">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v={{ asset_version }}">
 </head>
 <body>
     <a href="#joinScreen" class="skip-link">Перейти к содержимому</a>
@@ -456,10 +456,10 @@
             }
         })();
     </script>
-    <script src="/static/wiki-parser.js"></script>
-    <script src="/static/jira-search.js"></script>
-    <script src="/static/clipboard.js"></script>
-    <script src="/static/adf-parser.js"></script>
-    <script src="/static/script.js"></script>
+    <script src="/static/wiki-parser.js?v={{ asset_version }}"></script>
+    <script src="/static/jira-search.js?v={{ asset_version }}"></script>
+    <script src="/static/clipboard.js?v={{ asset_version }}"></script>
+    <script src="/static/adf-parser.js?v={{ asset_version }}"></script>
+    <script src="/static/script.js?v={{ asset_version }}"></script>
 </body>
 </html>

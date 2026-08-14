@@ -2,6 +2,8 @@ import json
 import re
 import time
 import uuid
+from contextlib import suppress
+from pathlib import Path
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -142,6 +144,22 @@ def enrich_session_response(game: Game, session_id: str) -> dict:
     return data
 
 
+def static_version() -> str:
+    """Метка версии для ссылок на статику: самое позднее время правки файлов.
+
+    Без неё браузер продолжает крутить прежние styles.css и script.js после
+    обновления сервера. Проверено вживую: правка CSS не применялась, пока не
+    сбросишь кеш вручную, — а человек видел «поиска нет» и «список не грузится»,
+    хотя код давно был на месте.
+    """
+    latest = 0.0
+    with suppress(OSError):
+        for path in Path("web/static").glob("*"):
+            if path.is_file():
+                latest = max(latest, path.stat().st_mtime)
+    return str(int(latest))
+
+
 async def web_index(request: Request):
     return state.templates.TemplateResponse(
         "index.html",
@@ -150,6 +168,7 @@ async def web_index(request: Request):
             "available_points": AVAILABLE_POINTS,
             "scale_names": SCALE_NAMES,
             "scales": SCALES,
+            "asset_version": static_version(),
         },
     )
 

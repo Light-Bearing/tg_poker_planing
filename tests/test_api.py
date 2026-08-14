@@ -591,3 +591,45 @@ class TestScaleChangeResetsVotes:
         sid = created["session_id"]
         r = client.post(f"/api/sessions/{sid}/scale", json={"username": "bob", "scale_name": "fibonacci"})
         assert r.status_code == 403
+
+
+class TestВерсияСтатики:
+    """Ссылки на статику получают метку версии.
+
+    Без неё браузер продолжал крутить прежние styles.css и script.js после
+    обновления сервера: правка CSS не применялась до ручного сброса кеша, а
+    человек видел «поиска нет» и «список не грузится» — хотя код был на месте.
+    """
+
+    def test_метка_непустая_и_числовая(self):
+        from web_api import static_version
+
+        assert static_version().isdigit()
+        assert int(static_version()) > 0
+
+    def test_метка_меняется_при_правке_файла(self, tmp_path, monkeypatch):
+        import os
+        import time
+
+        from web_api import static_version
+
+        было = static_version()
+        файл = "web/static/styles.css"
+        отметка = os.stat(файл).st_mtime
+        try:
+            os.utime(файл, (отметка + 10, отметка + 10))
+            time.sleep(0.01)
+            assert static_version() != было
+        finally:
+            os.utime(файл, (отметка, отметка))
+
+    def test_страница_подставляет_метку_в_ссылки(self, client):
+        from starlette.templating import Jinja2Templates
+
+        from web_api import static_version
+
+        state.templates = Jinja2Templates(directory="web/templates")
+        html = client.get("/").text
+        метка = static_version()
+        assert f"/static/styles.css?v={метка}" in html
+        assert f"/static/script.js?v={метка}" in html
