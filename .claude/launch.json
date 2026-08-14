@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "poker",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "PP_BOT_TOKEN=test:token .venv/bin/python main.py"],
+      "port": 8000,
+      "autoPort": true
+    }
+  ]
+}
