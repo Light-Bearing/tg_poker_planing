@@ -661,6 +661,17 @@ code {
     justify-content: center;
 }
 
+.rename-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.85em;
+    padding: 0 4px;
+    line-height: 1;
+}
+.rename-btn:hover { color: var(--accent); }
+
 .kick-btn {
     display: inline-flex;
     align-items: center;

@@ -11,6 +11,7 @@ from connection import manager
 from ppbot.game import GameRegistry, Initiator
 from websocket_handler import (
     cancel_initiator_transfer,
+    rename_in_game,
     reset_pending_transfers,
     schedule_initiator_transfer,
     transfer_initiator_if_needed,
@@ -1082,3 +1083,141 @@ class TestОтсрочкаПереносаРоли:
 
         saved = await state.storage.get_game(WEB_CHAT_ID, "s4")
         assert saved.initiator.id == "web_bob"
+
+
+class TestСменаИмени:
+    """Человек вошёл и хочет назваться иначе.
+
+    Имя — ключ во всех трёх учётах и в идентификаторе голоса, поэтому смена должна
+    переносить всё разом: иначе участник раздвоится, а его голос потеряется.
+    """
+
+    def test_имя_переезжает_вместе_с_голосом_и_сокетом(self):
+        ws = MagicMock()
+        manager.register_user("s1", "Аня")
+        manager.session_users["s1"]["Аня"]["vote"] = "5"
+        manager.register_ws_connection("s1", "Аня", ws)
+
+        assert manager.rename_user("s1", "Аня", "Анна") is True
+
+        assert "Аня" not in manager.session_users["s1"]
+        assert manager.session_users["s1"]["Анна"]["vote"] == "5"
+        assert manager.is_ws_connected("s1", "Анна") is True
+        assert manager.is_ws_connected("s1", "Аня") is False
+        assert manager.get_all_ws_by_username("s1", "Анна") == [ws]
+
+    def test_занятое_имя_не_отдаётся(self):
+        manager.register_user("s1", "Аня")
+        manager.register_user("s1", "Борис")
+        assert manager.rename_user("s1", "Аня", "Борис") is False
+        assert "Аня" in manager.session_users["s1"]
+
+    def test_то_же_имя_не_ломает_учёт(self):
+        ws = MagicMock()
+        manager.register_user("s1", "Аня")
+        manager.register_ws_connection("s1", "Аня", ws)
+        assert manager.rename_user("s1", "Аня", "Аня") is True
+        assert manager.is_ws_connected("s1", "Аня") is True
+
+    def test_неизвестного_переименовать_нельзя(self):
+        manager.register_user("s1", "Аня")
+        assert manager.rename_user("s1", "Кто-то", "Новый") is False
+
+    def test_переезжают_все_вкладки(self):
+        первая, вторая = MagicMock(), MagicMock()
+        manager.register_user("s1", "Аня")
+        manager.register_ws_connection("s1", "Аня", первая)
+        manager.register_ws_connection("s1", "Аня", вторая)
+
+        manager.rename_user("s1", "Аня", "Анна")
+
+        assert set(manager.get_all_ws_by_username("s1", "Анна")) == {первая, вторая}
+        assert manager.get_all_ws_by_username("s1", "Аня") == []
+
+
+class TestСменаИмениВИгре:
+    async def test_голос_и_роль_ведущего_переезжают(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s9", Initiator.from_web("Аня"), "задача")
+        game.add_vote({"id": "web_Аня"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("s9", "Аня")
+        manager.register_ws_connection("s9", "Аня", MagicMock())
+
+        await rename_in_game("s9", "Аня", "Анна")
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s9")
+        assert saved.initiator.id == "web_Анна"
+        assert "web_Анна" in saved.votes
+        assert "web_Аня" not in saved.votes
+        assert saved.votes["web_Анна"].point == "5"
+
+    async def test_чужая_роль_не_трогается(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s10", Initiator.from_web("Борис"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s10", "Аня")
+
+        await rename_in_game("s10", "Аня", "Анна")
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "s10")
+        assert saved.initiator.id == "web_Борис"
+
+
+class TestСменаИмениПоСокету:
+    async def test_имя_меняется_и_рассылается(self, ws):
+        game = state.storage.new_game(WEB_CHAT_ID, "test-session", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": "Аня"}),
+            json.dumps({"type": "rename", "new_username": "Анна"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        события = [c.args[0] for c in ws.send_json.await_args_list]
+        переименование = [e for e in события if e.get("type") == "renamed"]
+        assert len(переименование) == 1
+        assert переименование[0]["old_username"] == "Аня"
+        assert переименование[0]["new_username"] == "Анна"
+
+        saved = await state.storage.get_game(WEB_CHAT_ID, "test-session")
+        assert saved.initiator.id == "web_Анна"
+
+    async def test_занятое_имя_отклоняется_с_объяснением(self, ws):
+        game = state.storage.new_game(WEB_CHAT_ID, "test-session", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("test-session", "Борис")
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": "Аня"}),
+            json.dumps({"type": "rename", "new_username": "Борис"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        ошибки = [c.args[0] for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert any("занято" in e["message"] for e in ошибки)
+
+    async def test_негодное_имя_отклоняется(self, ws):
+        game = state.storage.new_game(WEB_CHAT_ID, "test-session", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "join", "username": "Аня"}),
+            json.dumps({"type": "rename", "new_username": "<script>alert(1)</script>"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        ошибки = [c.args[0] for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert any("Недопустимое имя" in e["message"] for e in ошибки)
+        assert "Аня" in manager.session_users["test-session"]
+
+    async def test_до_входа_переименоваться_нельзя(self, ws):
+        game = state.storage.new_game(WEB_CHAT_ID, "test-session", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        ws.receive_text.side_effect = [
+            json.dumps({"type": "rename", "new_username": "Кто-угодно"}),
+            WebSocketDisconnect(),
+        ]
+        await websocket_endpoint(ws)
+
+        ошибки = [c.args[0] for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
+        assert any("Сначала войдите" in e["message"] for e in ошибки)

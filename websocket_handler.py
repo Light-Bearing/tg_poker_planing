@@ -157,6 +157,33 @@ async def transfer_initiator_if_needed(session_id: str, leaving_username: str):
     )
 
 
+async def rename_in_game(session_id: str, old_username: str, new_username: str) -> None:
+    """Переносит голос и роль ведущего на новое имя.
+
+    Идентификатор участника в игре собран из имени, поэтому смена имени без этого
+    переноса теряла бы голос и отдавала комнату «прежнему» человеку, которого больше
+    нет в списке.
+    """
+    game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+    if not game:
+        return
+
+    old_id, new_id = f"web_{old_username}", f"web_{new_username}"
+    изменилось = False
+
+    if old_id in game.votes:
+        game.votes[new_id] = game.votes.pop(old_id)
+        game._invalidate_cache()
+        изменилось = True
+
+    if game.initiator.id == old_id:
+        game.initiator = Initiator.from_web(new_username)
+        изменилось = True
+
+    if изменилось:
+        await state.storage.save_game(game)
+
+
 async def websocket_endpoint(websocket: WebSocket):
     session_id = websocket.path_params["session_id"]
     username = None
@@ -212,6 +239,39 @@ async def websocket_endpoint(websocket: WebSocket):
                                         session_id,
                                         {"type": "update", "data": current_data},
                                     )
+                    elif msg_type == "rename":
+                        # Переименовываем того, кто пришёл по этому сокету, а не того,
+                        # чьё имя указано в сообщении: иначе любой участник мог бы
+                        # переименовать соседа.
+                        new_username = validate_username(msg.get("new_username", ""))
+                        if not username:
+                            await websocket.send_json(
+                                {"type": "error", "message": "Сначала войдите в комнату"}
+                            )
+                        elif not new_username:
+                            await websocket.send_json(
+                                {"type": "error", "message": "Недопустимое имя участника"}
+                            )
+                        elif not manager.rename_user(session_id, username, new_username):
+                            await websocket.send_json(
+                                {"type": "error", "message": f"Имя «{new_username}» уже занято в этой комнате"}
+                            )
+                        else:
+                            await rename_in_game(session_id, username, new_username)
+                            # Отложенный перенос роли был заведён на прежнее имя
+                            cancel_initiator_transfer(session_id, username)
+                            old_username, username = username, new_username
+                            game = await state.storage.get_game(WEB_CHAT_ID, session_id)
+                            if game:
+                                await manager.broadcast(
+                                    session_id,
+                                    {
+                                        "type": "renamed",
+                                        "old_username": old_username,
+                                        "new_username": new_username,
+                                        "data": enrich_session_response(game, session_id),
+                                    },
+                                )
                     elif msg_type == "set_scale":
                         scale_name = msg.get("scale_name", "")
                         setter_username = msg.get("username", "")

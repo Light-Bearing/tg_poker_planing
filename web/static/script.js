@@ -2108,6 +2108,8 @@ document.addEventListener('DOMContentLoaded', () => {
         participantsList.addEventListener('click', (e) => {
             const btn = e.target.closest('.kick-btn');
             if (btn) kickParticipant(btn.dataset.username);
+            const rename = e.target.closest('.rename-btn');
+            if (rename) requestRename();
         });
     }
 
@@ -2430,6 +2432,19 @@ function connectWebSocket(sessionId) {
             } else if (message.type === 'user_kicked') {
                 updateSessionDisplay(message.data);
                 return;
+            } else if (message.type === 'renamed') {
+                // Своё имя запоминаем везде, где оно живёт: под ним же мы
+                // переподключаемся и голосуем
+                if (message.old_username === state.username) {
+                    state.username = message.new_username;
+                    localStorage.setItem('pp_username', state.username);
+                    const поле = document.getElementById('username');
+                    if (поле) поле.value = state.username;
+                    toast.success(`Теперь вы ${message.new_username}`);
+                } else {
+                    toast.info(`${message.old_username} теперь ${message.new_username}`);
+                }
+                updateSessionDisplay(message.data);
             } else if (message.type === 'init' || message.type === 'update') {
                 const prevVoteCount = document.getElementById('voteCount').textContent;
                 updateSessionDisplay(message.data);
@@ -2722,6 +2737,20 @@ function updateSessionDisplay(session) {
     votingSection.style.pointerEvents = session.revealed ? 'none' : 'auto';
 }
 
+// Смена имени, не выходя из комнаты. Переносом занимается сервер: имя служит
+// ключом в учёте участников и в идентификаторе голоса, и разъехаться им нельзя.
+function requestRename() {
+    const текущее = state.username || '';
+    const новое = (prompt('Как вас называть?', текущее) || '').trim();
+    if (!новое || новое === текущее) return;
+
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        toast.error('Нет связи с комнатой');
+        return;
+    }
+    state.ws.send(JSON.stringify({ type: 'rename', new_username: новое }));
+}
+
 function renderParticipants(session) {
     let participants = session.participants || [];
     const uniqueParticipants = {};
@@ -2808,6 +2837,7 @@ function renderParticipants(session) {
                     <div class="participant-indicator ${p.online ? 'online' : 'offline'}"></div>
                     <span class="participant-name" title="${safeName}">${safeName}</span>
                     ${p.isYou ? '<span class="participant-badge">ВЫ</span>' : ''}
+                    ${p.isYou ? '<button class="rename-btn" title="Сменить имя">✎</button>' : ''}
                     ${state.isInitiator && p.username !== state.username ? `<button class="kick-btn" data-username="${safeName}" title="Исключить">✕</button>` : ''}
                     ${!session.revealed && hasVoted ? '<span class="vote-dot" title="Проголосовал"></span>' : ''}
                 </div>

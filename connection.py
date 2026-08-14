@@ -173,6 +173,31 @@ class ConnectionManager:
         if session_id in self.active_connections and not self.active_connections[session_id]:
             del self.active_connections[session_id]
 
+    def rename_user(self, session_id: str, old_username: str, new_username: str) -> bool:
+        """Переносит человека под новое имя. False — если нельзя.
+
+        Имя служит ключом сразу в трёх учётах, поэтому переносить надо всё разом:
+        иначе участник раздваивается — под старым именем висит его голос, под новым
+        сидит он сам. Сокеты переезжают вместе с ним, чтобы не потерять вкладки.
+        """
+        участники = self.session_users.get(session_id)
+        if not участники or old_username not in участники:
+            return False
+        if new_username != old_username and new_username in участники:
+            return False
+        if new_username == old_username:
+            return True
+
+        участники[new_username] = участники.pop(old_username)
+
+        if session_id in self.ws_username_map and old_username in self.ws_username_map[session_id]:
+            self.ws_username_map[session_id].discard(old_username)
+            self.ws_username_map[session_id].add(new_username)
+        sockets = self._ws_connections.get(session_id, {}).pop(old_username, None)
+        if sockets:
+            self._ws_connections[session_id][new_username] = sockets
+        return True
+
     def kick_user(self, session_id: str, target_username: str) -> bool:
         """Remove a user from the session. Returns True if user was found and removed."""
         if session_id not in self.session_users:
