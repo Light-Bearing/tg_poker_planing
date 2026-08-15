@@ -838,6 +838,9 @@ code {
     border: 1px solid rgba(255, 209, 102, 0.3); 
     animation: blink 2s infinite; 
 }
+/* На фоне карточки светлой темы (#ddd8ce) общий --warning даёт 4.29 при пороге
+   4.5 — берём на полтона темнее, выходит 5.66 */
+.light-theme .vote-status.pending { color: #8a3608; }
 
 .empty-message { 
     color: var(--text-secondary); 
@@ -892,6 +895,9 @@ code {
 .btn-success { background: var(--success); color: var(--bg-body); border-color: var(--success); }
 .btn-success:hover { box-shadow: 0 0 12px rgba(6, 214, 160, 0.4); }
 .btn-warning { background: var(--warning); color: #000; border-color: var(--warning); }
+/* В светлой теме --warning тёмно-оранжевый, и чёрным по нему выходит 3.45 при
+   пороге 4.5. Белым — 6.09. В тёмной теме фон жёлтый, там наоборот нужен чёрный. */
+.light-theme .btn-warning { color: #fff; }
 .btn-warning:hover { box-shadow: 0 0 12px rgba(255, 209, 102, 0.4); }
 .btn-outline { background: transparent; color: var(--text-primary); }
 .btn-outline:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--accent); }
@@ -1926,17 +1932,36 @@ code {
     .task-header-right {
         font-size: 0.8em;
     }
+    /* На телефоне карточки участников стояли в два узких столбца: имя обрезалось
+       до «Ал…» при пустой половине экрана. Раскладываем в строку — имя получает
+       всю ширину, голос уходит вправо. */
     .participants-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        grid-template-columns: 1fr;
         gap: 6px;
     }
     .participant-card {
-        min-height: 70px;
-        padding: 6px;
+        min-height: 0;
+        padding: 8px 10px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .participant-card-header {
+        flex: 1;
+        min-width: 0;
+        justify-content: flex-start;
     }
     .participant-name {
-        font-size: 0.8em;
-        max-width: 60px;
+        font-size: 0.9em;
+        max-width: none;
+        flex: 1;
+        text-align: left;
+    }
+    /* Палец в 18 пикселей не попадает — растим область нажатия */
+    .rename-btn, .kick-btn {
+        min-width: 32px;
+        min-height: 32px;
+        font-size: 1em;
     }
     .vote-value {
         font-size: 1em;

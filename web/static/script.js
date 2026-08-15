@@ -11,8 +11,10 @@ const AUTO_RESTORE_FOCUS_DELAY = 50;
 const RECONNECT_BASE_DELAY = 2000;
 const MAX_RECENT_ROOMS = 5;
 const MAX_TOASTS_ON_SCREEN = 4;
-const TOAST_DURATION_DEFAULT = 4000;
-const TOAST_DURATION_ERROR = 5000;
+// Судья интерфейса дважды не успел прочесть сообщение об отказе: пока переводишь
+// взгляд от кнопки в правый нижний угол, тоста уже нет.
+const TOAST_DURATION_DEFAULT = 6000;
+const TOAST_DURATION_ERROR = 9000;
 
 let state = {
     username: localStorage.getItem('pp_username') || '',
@@ -1446,6 +1448,13 @@ async function clearRecentRooms() {
     toast.info('История комнат очищена');
 }
 
+// Забывает комнату, которой больше нет на сервере
+function forgetRecentRoom(sessionId) {
+    const остальные = loadRecentRooms().filter(r => r.id !== sessionId);
+    localStorage.setItem('pp_recent_rooms', JSON.stringify(остальные));
+    renderRecentRooms();
+}
+
 function joinRecentRoom(sessionId) {
     // Если у пользователя уже есть идентификатор — сразу подключаемся к комнате
     if (state.username) {
@@ -2405,7 +2414,12 @@ async function joinOrCreateSession() {
     try {
         if (sessionId) {
             const response = await fetch(`/api/sessions/${sessionId}`);
-            if (!response.ok) throw new Error('Комната не найдена');
+            if (!response.ok) {
+                // Комнаты живут ограниченно, а в «Последних» остаются навсегда.
+                // Убираем мёртвую сразу, иначе человек будет тыкать в неё снова.
+                forgetRecentRoom(sessionId);
+                throw new Error('Комната не найдена — она уже закрыта');
+            }
             const data = await response.json();
             
             // ✅ Определяем, являемся ли мы инициатором из данных сервера
@@ -2924,7 +2938,10 @@ function renderParticipants(session) {
     }
 
     const grid = document.getElementById('participantsList');
-    document.getElementById('participantCount').textContent = pList.length;
+    // Считаем тех, кто на связи: прогресс голосования считает их же, и два числа
+    // на одном экране спорили друг с другом — «УЧАСТНИКИ 2» при «1 / 1 проголосовало».
+    const наСвязи = pList.filter(p => p.online).length;
+    document.getElementById('participantCount').textContent = наСвязи;
 
     if (pList.length === 0) {
         grid.innerHTML = '<p class="empty-message">Ожидание подключений...</p>';
