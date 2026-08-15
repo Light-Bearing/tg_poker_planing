@@ -66,7 +66,9 @@ SCALES = {
     "tshirt": ["XS", "S", "M", "L", "XL", "XXL", "❔", "☕"],
 }
 SCALE_NAMES = {
-    "custom": "Custom",
+    # Остальные три — имена шкал, их не переводят. «Custom» именем не было: это
+    # слово стояло по-английски посреди русского интерфейса и ничего не называло
+    "custom": "Своя шкала",
     "fibonacci": "Fibonacci",
     "powers_of_2": "Powers of 2",
     "tshirt": "T-shirt",

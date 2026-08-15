@@ -119,35 +119,49 @@ def game_to_web_response(game: Game, session_id: str) -> dict:
     return response
 
 
+def session_participants(game: Game, session_id: str) -> list[dict]:
+    """Состав комнаты: кто на связи и чей голос уже лежит на столе.
+
+    Один список на все нужды — карточки, счётчик участников, знаменатель прогресса
+    и условие автовскрытия. Пока их считали по-разному, экран спорил сам с собой
+    («3 / 1 ПРОГОЛОСОВАЛО»), а автовскрытие ждало тех, кого на экране уже не было:
+    session_users при отключении намеренно не чистится, и ушедший навсегда держал
+    комнату закрытой.
+
+    Кто отключился только что, остаётся в составе на PRESENCE_GRACE_SECONDS —
+    перезагрузка страницы не должна открывать карты у человека за спиной.
+    """
+    canonical_votes = {v["user_id"]: v for v in game_to_web_response(game, session_id)["votes"]}
+    участники: dict[str, dict] = {}
+
+    for username in manager.session_users.get(session_id, {}):
+        user_id = f"web_{username}"
+        на_связи = manager.is_ws_connected(session_id, username)
+        if not manager.is_present(session_id, username) and user_id not in canonical_votes:
+            continue
+        участники[user_id] = {
+            "user_id": user_id,
+            "username": username,
+            "online": на_связи,
+            "vote": canonical_votes.get(user_id),
+        }
+
+    # Голос без участника: человек проголосовал и ушёл — его оценка остаётся на столе
+    for user_id, vote in canonical_votes.items():
+        участники.setdefault(
+            user_id,
+            {"user_id": user_id, "username": vote["username"], "online": False, "vote": vote},
+        )
+
+    return list(участники.values())
+
+
 def enrich_session_response(game: Game, session_id: str) -> dict:
     data = game_to_web_response(game, session_id)
-
-    canonical_votes = {v["user_id"]: v for v in data["votes"]}
-    participants_dict = {}
-
-    if session_id in manager.session_users:
-        for username, user_data in manager.session_users[session_id].items():
-            user_id = f"web_{username}"
-            participants_dict[user_id] = {
-                "user_id": user_id,
-                "username": username,
-                # Не «есть в session_users», а «сейчас на связи»: session_users при
-                # отключении намеренно не чистится — он нужен для переподключения и
-                # подсчёта автовскрытия, — и вышедший участник оставался «в сети» навсегда.
-                "online": manager.is_ws_connected(session_id, username),
-                "vote": canonical_votes.get(user_id),
-            }
-
-    for user_id, vote in canonical_votes.items():
-        if user_id not in participants_dict:
-            participants_dict[user_id] = {
-                "user_id": user_id,
-                "username": vote["username"],
-                "online": False,
-                "vote": vote,
-            }
-
-    data["participants"] = list(participants_dict.values())
+    data["participants"] = session_participants(game, session_id)
+    # Знаменатель прогресса считает сервер: у клиента нет сведений о том, кто ещё
+    # числится в комнате, и он показывал своё число вместо того, которого ждёт сервер
+    data["expected_votes"] = len(data["participants"])
     return data
 
 

@@ -9,6 +9,12 @@ if TYPE_CHECKING:
     from ppbot.game import Game
 
 
+# Сколько человек ещё считается участником комнаты после закрытия последней вкладки.
+# Столько же ждёт перенос роли ведущего (INITIATOR_GRACE_SECONDS): перезагрузка
+# страницы не должна ни отнимать комнату, ни выбрасывать из состава.
+PRESENCE_GRACE_SECONDS = 30.0
+
+
 class ConnectionManager:
     """Manages WebSocket connections, user registration, and session state.
 
@@ -25,6 +31,8 @@ class ConnectionManager:
         self._ws_connections: dict[str, dict[str, WebSocket]] = {}
         # Момент, когда сессия осталась без активных подключений (session_id -> time.time())
         self._orphaned_at: dict[str, float] = {}
+        # Когда человек закрыл последнюю вкладку комнаты ((session_id, username) -> time.time())
+        self._left_at: dict[tuple[str, str], float] = {}
 
     async def connect(self, session_id: str, websocket: WebSocket):
         """Accept and register a new WebSocket connection for a session."""
@@ -116,6 +124,7 @@ class ConnectionManager:
             self._ws_connections[session_id] = {}
         self.ws_username_map[session_id].add(username)
         self._ws_connections[session_id].setdefault(username, set()).add(websocket)
+        self._left_at.pop((session_id, username), None)
 
     def unregister_ws_connection(self, session_id: str, username: str, websocket: WebSocket | None = None):
         """Убирает сокет человека из учёта активных подключений.
@@ -137,12 +146,32 @@ class ConnectionManager:
         if session_id in self.ws_username_map:
             self.ws_username_map[session_id].discard(username)
             self._ws_connections[session_id].pop(username, None)
+            self._left_at[(session_id, username)] = time.time()
             if not self.ws_username_map[session_id]:
                 del self.ws_username_map[session_id]
                 del self._ws_connections[session_id]
 
     def is_ws_connected(self, session_id: str, username: str) -> bool:
         return username in self.ws_username_map.get(session_id, set())
+
+    def is_present(self, session_id: str, username: str, grace: float | None = None) -> bool:
+        """На связи — или только что был.
+
+        Перезагрузка страницы для сервера неотличима от ухода: сокет закрылся. Без
+        отсрочки участник на секунду выпадал из состава комнаты, и автовскрытие могло
+        открыть карты у него за спиной. Ушедший насовсем, наоборот, не должен держать
+        комнату: после отсрочки он перестаёт считаться.
+        """
+        if grace is None:
+            grace = PRESENCE_GRACE_SECONDS
+        if self.is_ws_connected(session_id, username):
+            return True
+        left = self._left_at.get((session_id, username))
+        if left is None:
+            # Вошёл по HTTP, сокет ещё не открыл — считаем участником, иначе карты
+            # успевали открыться в промежутке между входом и подключением
+            return True
+        return (time.time() - left) < grace
 
     def get_active_ws_usernames(self, session_id: str) -> set[str]:
         return self.ws_username_map.get(session_id, set()).copy()
@@ -196,6 +225,9 @@ class ConnectionManager:
         sockets = self._ws_connections.get(session_id, {}).pop(old_username, None)
         if sockets:
             self._ws_connections[session_id][new_username] = sockets
+        ушёл = self._left_at.pop((session_id, old_username), None)
+        if ушёл is not None:
+            self._left_at[(session_id, new_username)] = ушёл
         return True
 
     def kick_user(self, session_id: str, target_username: str) -> bool:
@@ -225,6 +257,8 @@ class ConnectionManager:
             del self.ws_username_map[session_id]
         if session_id in self._ws_connections and not self._ws_connections[session_id]:
             del self._ws_connections[session_id]
+        # Исключённый не должен доживать отсрочку присутствия: его удалили насовсем
+        self._left_at.pop((session_id, target_username), None)
         return True
 
     def update_user_vote(self, session_id: str, username: str, vote_data: dict):

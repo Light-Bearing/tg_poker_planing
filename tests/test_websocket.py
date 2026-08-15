@@ -9,6 +9,7 @@ import state
 from config import WEB_CHAT_ID
 from connection import manager
 from ppbot.game import GameRegistry, Initiator
+from web_api import enrich_session_response, session_participants
 from websocket_handler import (
     cancel_initiator_transfer,
     rename_in_game,
@@ -27,6 +28,7 @@ def _reset_manager():
     manager.session_users.clear()
     manager.ws_username_map.clear()
     manager._ws_connections.clear()
+    manager._left_at.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -1221,3 +1223,106 @@ class TestСменаИмениПоСокету:
 
         ошибки = [c.args[0] for c in ws.send_json.await_args_list if c.args[0].get("type") == "error"]
         assert any("Сначала войдите" in e["message"] for e in ошибки)
+
+
+class TestСоставКомнаты:
+    """Одно число вместо трёх спорящих.
+
+    Судья интерфейса снял экран, где значок показывал «УЧАСТНИКИ 1», карточек было
+    три, а подпись говорила «3 / 1 ПРОГОЛОСОВАЛО». Хуже арифметики было следствие:
+    сервер ждал автовскрытия от тех, кого на экране уже не было, и карты не
+    открывались никогда.
+    """
+
+    async def test_ушедший_насовсем_из_состава_выпадает(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s1", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s1", "Аня")
+        manager.register_user("s1", "Петя")
+        manager.register_ws_connection("s1", "Аня", MagicMock())
+        сокет = MagicMock()
+        manager.register_ws_connection("s1", "Петя", сокет)
+
+        # Петя закрыл вкладку и не вернулся: отсрочку присутствия обнуляем
+        manager.unregister_ws_connection("s1", "Петя", сокет)
+        with patch("connection.PRESENCE_GRACE_SECONDS", 0):
+            состав = {p["username"] for p in session_participants(game, "s1")}
+
+        assert состав == {"Аня"}
+
+    async def test_перезагрузка_из_состава_не_выбрасывает(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s2", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s2", "Аня")
+        manager.register_user("s2", "Петя")
+        manager.register_ws_connection("s2", "Аня", MagicMock())
+        сокет = MagicMock()
+        manager.register_ws_connection("s2", "Петя", сокет)
+        manager.unregister_ws_connection("s2", "Петя", сокет)
+
+        состав = {p["username"] for p in session_participants(game, "s2")}
+        assert состав == {"Аня", "Петя"}, "F5 не должен выбрасывать человека из комнаты"
+
+    async def test_проголосовавший_остаётся_даже_уйдя(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s3", Initiator.from_web("Аня"), "задача")
+        game.add_vote({"id": "web_Петя", "first_name": "Петя", "username": "Петя"}, "5")
+        await state.storage.save_game(game)
+        manager.register_user("s3", "Аня")
+        manager.register_user("s3", "Петя")
+        manager.register_ws_connection("s3", "Аня", MagicMock())
+        сокет = MagicMock()
+        manager.register_ws_connection("s3", "Петя", сокет)
+        manager.unregister_ws_connection("s3", "Петя", сокет)
+
+        with patch("connection.PRESENCE_GRACE_SECONDS", 0):
+            состав = {p["username"]: p for p in session_participants(game, "s3")}
+
+        # Голос лежит на столе — его хозяин остаётся в составе, но помечен «не на связи»
+        assert set(состав) == {"Аня", "Петя"}
+        assert состав["Петя"]["online"] is False
+        assert состав["Петя"]["vote"] is not None
+
+    async def test_знаменатель_совпадает_с_числом_карточек(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s4", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s4", "Аня")
+        manager.register_user("s4", "Петя")
+        manager.register_ws_connection("s4", "Аня", MagicMock())
+        manager.register_ws_connection("s4", "Петя", MagicMock())
+
+        данные = enrich_session_response(game, "s4")
+        assert данные["expected_votes"] == len(данные["participants"]) == 2
+
+    async def test_ушедший_не_держит_автовскрытие(self):
+        from websocket_handler import check_auto_reveal
+
+        game = state.storage.new_game(WEB_CHAT_ID, "s5", Initiator.from_web("Аня"), "задача")
+        game.auto_reveal = True
+        await state.storage.save_game(game)
+        manager.register_user("s5", "Аня")
+        manager.register_user("s5", "Петя")
+        manager.register_ws_connection("s5", "Аня", MagicMock())
+        сокет = MagicMock()
+        manager.register_ws_connection("s5", "Петя", сокет)
+        manager.unregister_ws_connection("s5", "Петя", сокет)
+
+        game.add_vote({"id": "web_Аня", "first_name": "Аня", "username": "Аня"}, "8")
+        await state.storage.save_game(game)
+
+        with patch("connection.PRESENCE_GRACE_SECONDS", 0), patch("connection.manager.broadcast", new=AsyncMock()):
+            await check_auto_reveal("s5", game)
+
+        assert game.revealed is True, "оставшийся один в комнате не должен ждать ушедшего вечно"
+
+    async def test_исключённый_состав_покидает_сразу(self):
+        game = state.storage.new_game(WEB_CHAT_ID, "s6", Initiator.from_web("Аня"), "задача")
+        await state.storage.save_game(game)
+        manager.register_user("s6", "Аня")
+        manager.register_user("s6", "Петя")
+        manager.register_ws_connection("s6", "Аня", MagicMock())
+        manager.register_ws_connection("s6", "Петя", MagicMock())
+
+        manager.kick_user("s6", "Петя")
+
+        состав = {p["username"] for p in session_participants(game, "s6")}
+        assert состав == {"Аня"}, "исключённый не должен доживать отсрочку присутствия"

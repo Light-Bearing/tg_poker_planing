@@ -203,7 +203,7 @@
                     <div class="card" id="resultCard" style="display:none;">
                         <h2><span class="diamond"></span> РЕЗУЛЬТАТ <button class="jira-send-btn" id="jiraSendBtn" style="display:none;" onclick="jiraSendEstimate()">⚡ В JIRA</button></h2>
                         <div style="text-align: center; padding: 10px;">
-                            <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue" contenteditable="true" title="Кликните чтобы изменить значение">-</div>
+                            <div style="font-family: var(--font-mono); font-size: 3em; font-weight: 700; color: var(--accent); text-shadow: 0 0 20px var(--accent-glow);" id="resultValue" contenteditable="false">-</div>
                             <div style="font-size: 0.75em; color: var(--text-secondary); letter-spacing: 2px; text-transform: uppercase; margin-top: 8px;" id="resultLabel">ИТОГ</div>
                         </div>
                     </div>
@@ -254,7 +254,13 @@
             <!-- Нет расширения -->
             <div id="jiraNoExt" class="jira-no-ext">
                 <div class="jira-no-ext-icon">🧩</div>
-                <p>Для интеграции с Jira нужно расширение браузера.</p>
+                <!-- Раньше здесь была одна строка «нужно расширение» и шесть шагов
+                     установки — про то, ради чего всё это, не говорилось ничего -->
+                <p>С расширением задачи из Jira подтягиваются прямо в комнату: можно выбрать
+                   задачу вместо ручного описания, видеть её текст при голосовании и отправлять
+                   итоговую оценку обратно в Jira одной кнопкой.</p>
+                <p class="jira-no-ext-note">Токен остаётся в расширении и на сервер Planning
+                   Poker не попадает.</p>
                 <div style="display:flex;gap:8px;margin-bottom:12px;">
                     <a class="btn btn-primary" href="/extension/download?download=true" download style="flex:1;justify-content:center;">
                         📦 СКАЧАТЬ РАСШИРЕНИЕ
@@ -402,7 +408,7 @@
             </div>
             <div class="confirm-message" id="confirmMessage"></div>
             <div class="confirm-actions">
-                <button class="btn btn-outline" onclick="closeConfirmModal(false)">ОТМЕНА</button>
+                <button class="btn btn-outline" id="confirmCancelBtn" onclick="closeConfirmModal(false)">ОТМЕНА</button>
                 <button class="btn btn-primary" id="confirmOkBtn" onclick="closeConfirmModal(true)">ПОДТВЕРДИТЬ</button>
             </div>
         </div>
@@ -487,6 +493,7 @@
     <script src="/static/wiki-parser.js?v={{ asset_version }}"></script>
     <script src="/static/jira-search.js?v={{ asset_version }}"></script>
     <script src="/static/salute.js?v={{ asset_version }}"></script>
+    <script src="/static/estimate.js?v={{ asset_version }}"></script>
     <script src="/static/clipboard.js?v={{ asset_version }}"></script>
     <script src="/static/adf-parser.js?v={{ asset_version }}"></script>
     <script src="/static/script.js?v={{ asset_version }}"></script>

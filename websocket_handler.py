@@ -8,7 +8,7 @@ import state
 from config import WEB_CHAT_ID, logger
 from connection import manager
 from ppbot.game import SCALES, Initiator
-from web_api import enrich_session_response, process_web_vote, validate_username
+from web_api import enrich_session_response, process_web_vote, session_participants, validate_username
 
 
 async def check_auto_reveal(session_id: str, game):
@@ -26,8 +26,9 @@ async def check_auto_reveal(session_id: str, game):
         return
     game.revealed = fresh_game.revealed  # синхронизируем
 
-    # Получаем участников сессии
-    participants = manager.session_users.get(session_id, {})
+    # Состав комнаты — тот же, что видит человек на экране: иначе карты открываются
+    # не тогда, когда счётчик показывает полный набор
+    participants = session_participants(game, session_id)
     if not participants:
         return
 

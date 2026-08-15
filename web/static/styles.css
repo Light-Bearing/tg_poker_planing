@@ -692,7 +692,9 @@ code {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: 9999;
+    /* Выше окон (10001–10002), ниже уведомлений (10003): при открытом окне
+       искры уходили под затемнение, и салюта не было видно вовсе */
+    z-index: 10002;
 }
 
 .reconnect-failed {
@@ -703,10 +705,13 @@ code {
     flex-wrap: wrap;
     padding: 12px 16px;
     margin-bottom: 12px;
-    background: var(--danger-bg, #4a1010);
-    border: 1px solid var(--danger, #d9534f);
+    /* Тёмно-красный в обеих темах: это не оформление, а тревога */
+    background: #4a1010;
+    border: 1px solid var(--danger);
     border-radius: 2px;
-    color: var(--text);
+    /* Переменной --text в проекте нет — цвет сваливался в наследуемый тёмный,
+       и текст про потерю связи читался с контрастом 1.08:1 на красном фоне */
+    color: #ffe8e8;
 }
 .reconnect-failed .btn { width: auto; }
 
@@ -758,6 +763,11 @@ code {
     opacity: 1 !important;
     background: rgba(239, 68, 68, 0.15);
     color: #ef4444;
+}
+/* Там, где нечем навести курсор, кнопка видна сразу: иначе ведущий с телефона
+   тычет вслепую и не догадывается, что участника вообще можно исключить */
+@media (hover: none) {
+    .kick-btn, .rename-btn { opacity: 0.6; }
 }
 
 .participant-indicator { 
@@ -1157,6 +1167,10 @@ code {
     color: var(--text-primary);
     font-family: var(--font-mono);
     font-size: 0.85em;
+    /* Без flex-основы строка сжималась до нуля, и на узком экране от «T-shirt ·
+       8 значений» не оставалось ничего: какая в комнате шкала, было не узнать */
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1312,7 +1326,8 @@ code {
 
 .recent-task {
     color: var(--text-secondary);
-    font-size: 0.75em;
+    /* Было 0.75em — 11.25 px: описание задачи, по которому и узнаёшь комнату */
+    font-size: 0.85em;
     margin-top: 2px;
     white-space: nowrap;
     overflow: hidden;
@@ -1321,7 +1336,8 @@ code {
 
 .recent-time {
     color: var(--text-secondary);
-    font-size: 0.65em;
+    /* Было 0.65em — 9.75 px, мельче, чем читается без прищура */
+    font-size: 0.8em;
     font-family: var(--font-mono);
     flex-shrink: 0;
 }
@@ -2007,8 +2023,14 @@ code {
     }
 }
 
-@media (max-width: 480px) { 
-    .points-grid { grid-template-columns: repeat(3, 1fr); } 
+@media (max-width: 480px) {
+    .points-grid { grid-template-columns: repeat(3, 1fr); }
+    /* Кнопка «⚙ ШКАЛА» на узком экране забирала всю строку. Отдаём подписи
+       отдельную строку целиком — она короткая, а знать её нужнее, чем экономить 20 px */
+    .scale-summary { flex-wrap: wrap; }
+    .scale-summary-text { flex-basis: 100%; white-space: normal; }
+    /* 26 px пальцем не берутся: 44 — минимум, который рекомендуют и Apple, и Google */
+    .scale-edit-btn { width: 40px; height: 40px; }
 }
 
 /* ========== JIRA SIDE PANEL ========== */
@@ -2095,6 +2117,12 @@ code {
     font-size: 0.9em;
     margin-bottom: 16px;
     line-height: 1.4;
+    text-align: left;
+}
+
+.jira-no-ext-note {
+    font-size: 0.82em !important;
+    opacity: 0.85;
 }
 
 .jira-install-help {

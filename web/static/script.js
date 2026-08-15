@@ -96,6 +96,9 @@ class ConfirmManager {
             document.getElementById('confirmTitle').textContent = title;
             document.getElementById('confirmMessage').textContent = message;
             document.getElementById('confirmOkBtn').textContent = okText;
+            // Подпись отмены раньше принимали и молча выбрасывали: диалог выхода
+            // просил кнопку «ОСТАТЬСЯ», а показывал «ОТМЕНА»
+            document.getElementById('confirmCancelBtn').textContent = cancelText;
             modal.classList.remove('hidden');
             
             // Фокус на кнопку ОК для быстрых действий с клавиатуры
@@ -1363,7 +1366,8 @@ function closeConfirmModal(result) {
 // ==================== JOIN SCREEN HELPERS ====================
 let SERVER_SCALE_NAMES = {};       // populated from server: {custom: "Custom", fibonacci: "Fibonacci", ...}
 let CURRENT_SCALE_NAME = localStorage.getItem('pp_last_scale') || "custom";  // current scale for this session
-const SPECIAL_POINTS = ["❔", "☕"];
+// SPECIAL_POINTS объявлен в estimate.js — он подключается раньше и владеет всем,
+// что связано с подсчётом итога
 
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -2497,7 +2501,30 @@ function hideReconnectFailed() {
     if (баннер) баннер.classList.add('hidden');
 }
 
+// Сеть вернулась — пробуем сами, не дожидаясь, пока человек нажмёт «обновить».
+// Пять попыток с растущей паузой заканчиваются за полминуты, а интернет пропадает
+// и на час: раньше после его возвращения комната так и висела с надписью «НЕТ СВЯЗИ».
+window.addEventListener('online', () => {
+    if (!state.sessionId) return;
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) return;
+    state.reconnectAttempts = 0;
+    hideReconnectFailed();
+    updateConnectionStatus('connecting');
+    connectWebSocket(state.sessionId);
+});
+
 function connectWebSocket(sessionId) {
+    // Одна вкладка — один сокет. Прежний рвём сами: брошенный, но живой сокет
+    // продолжает числиться на сервере под своим именем, а при открытии заново
+    // шлёт join — и исключённый участник возвращался в комнату призраком, хотя
+    // его вкладка уже стояла на экране входа. Обработчик закрытия снимаем, чтобы
+    // плановый разрыв не запустил цепочку переподключений.
+    if (state.ws) {
+        state.ws.onclose = null;
+        state.ws.onmessage = null;
+        try { state.ws.close(); } catch (e) { /* уже закрыт — и хорошо */ }
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.ws = new WebSocket(`${protocol}//${window.location.host}/ws/${sessionId}`);
     
@@ -2554,7 +2581,12 @@ function connectWebSocket(sessionId) {
                 return;
             } else if (message.type === 'kicked') {
                 toast.error(message.message || 'Вы были исключены из комнаты', 'ИСКЛЮЧЕНИЕ');
-                setTimeout(() => leaveSession(), 2000);
+                // Исключённого не спрашивают, хочет ли он уйти. Раньше здесь звали
+                // leaveSession(), и человеку показывали «Выйти из комнаты?» с кнопкой
+                // «ОСТАТЬСЯ» — он нажимал её и оставался, а вкладка ещё и
+                // переподключалась. Обнуляем комнату сразу, чтобы onclose не звал её назад.
+                state.sessionId = null;
+                setTimeout(() => exitRoom(), 2000);
                 return;
             } else if (message.type === 'user_kicked') {
                 updateSessionDisplay(message.data);
@@ -2827,18 +2859,36 @@ function updateSessionDisplay(session) {
     const averageCard = document.getElementById('averageCard');
     const resultCard = document.getElementById('resultCard');
     
-    if (session.revealed && session.average > 0) {
-        averageCard.style.display = 'block';
-        document.getElementById('averageValue').textContent = session.average.toFixed(1);
+    // Итог считаем и по нечисловым шкалам тоже: на T-shirt среднего нет, и раньше
+    // после вскрытия не показывали ни итога, ни разброса — оставалось «3 ГОЛОСОВ».
+    const голосаПослеВскрытия = session.revealed
+        ? (session.votes || []).map(v => v.real_point || v.point)
+        : [];
+    const итог = session.revealed
+        ? (session.average > 0
+            ? snapToScale(session.average, session.available_points)
+            : modePoint(голосаПослеВскрытия, session.available_points))
+        : null;
+
+    if (session.revealed && итог !== null) {
+        // Среднее показываем только там, где оно есть: по L и M его не вывести
+        averageCard.style.display = session.average > 0 ? 'block' : 'none';
+        if (session.average > 0) {
+            document.getElementById('averageValue').textContent = session.average.toFixed(1);
+        }
         resultCard.style.display = 'block';
         resultCard.style.cursor = 'default';
-        const resultVal = Math.round(Math.ceil(session.average) * 10) / 10;
+        const resultVal = итог;
         document.getElementById('resultValue').textContent = resultVal;
         document.getElementById('resultValue').dataset.lastValid = resultVal;
         // Редактировать результат может только инициатор и только для Jira задач
         const isJiraTask = !!currentJiraIssue?.key;
-        document.getElementById('resultValue').contentEditable = state.isInitiator && isJiraTask;
-        document.getElementById('resultLabel').textContent = state.isInitiator && isJiraTask ? 'КЛИК — ПРАВКА' : 'ИТОГ';
+        const правкаДоступна = state.isInitiator && isJiraTask;
+        document.getElementById('resultValue').contentEditable = правкаДоступна;
+        // Подсказка обещала правку всегда, а работала только у задач из Jira:
+        // человек кликал по числу в обычной комнате и не получал ничего
+        document.getElementById('resultValue').title = правкаДоступна ? 'Кликните чтобы изменить значение' : '';
+        document.getElementById('resultLabel').textContent = правкаДоступна ? 'КЛИК — ПРАВКА' : 'ИТОГ';
         // Кнопка Jira — только для инициатора и если есть задача из Jira
         const jiraSendBtn = document.getElementById('jiraSendBtn');
         const canSendToJira = state.isInitiator && isJiraTask && (
@@ -2852,23 +2902,32 @@ function updateSessionDisplay(session) {
         } else {
             jiraSendBtn.style.display = 'none';
         }
-        renderHistogram(session);
     } else {
         averageCard.style.display = 'none';
         resultCard.style.display = 'none';
         resultCard.style.cursor = 'default';
+    }
+
+    // Разброс голосов рисуем при любом вскрытии: даже когда итога нет (все ответили
+    // «не знаю»), видеть, кто что назвал, — весь смысл вскрытия
+    if (session.revealed) {
+        renderHistogram(session);
+    } else {
         document.getElementById('histogramContainer').innerHTML = '';
     }
-    
-    const totalConnected = session.participants ? session.participants.filter(p => p.online).length : 0;
+
+    // Знаменатель берём у сервера: именно этого числа он ждёт для автовскрытия.
+    // Пока клиент считал сам по тем, кто на связи, экран обещал «1 / 1 проголосовало»,
+    // а карты не открывались — сервер ждал ещё двоих.
+    const состав = session.expected_votes ?? (session.participants ? session.participants.length : 0);
     let percent = 0;
     let labelText = '';
-    if (totalConnected === 0) {
+    if (состав === 0) {
         percent = 0;
         labelText = '— / — ОЖИДАНИЕ УЧАСТНИКОВ';
     } else {
-        percent = Math.min(100, (session.vote_count / totalConnected) * 100);
-        labelText = `${session.vote_count} / ${totalConnected} ПРОГОЛОСОВАЛО`;
+        percent = Math.min(100, (session.vote_count / состав) * 100);
+        labelText = `${session.vote_count} / ${состав} ПРОГОЛОСОВАЛО`;
     }
     document.getElementById('progressFill').style.width = percent + '%';
     document.getElementById('progressLabel').textContent = labelText;
@@ -2958,10 +3017,10 @@ function renderParticipants(session) {
     }
 
     const grid = document.getElementById('participantsList');
-    // Считаем тех, кто на связи: прогресс голосования считает их же, и два числа
-    // на одном экране спорили друг с другом — «УЧАСТНИКИ 2» при «1 / 1 проголосовало».
-    const наСвязи = pList.filter(p => p.online).length;
-    document.getElementById('participantCount').textContent = наСвязи;
+    // Значок, знаменатель прогресса и число карточек — одно и то же число.
+    // Пока значок считал только тех, кто на связи, экран показывал «УЧАСТНИКИ 1»
+    // над тремя карточками и «3 / 1 ПРОГОЛОСОВАЛО».
+    document.getElementById('participantCount').textContent = session.expected_votes ?? pList.length;
 
     if (pList.length === 0) {
         grid.innerHTML = '<p class="empty-message">Ожидание подключений...</p>';
@@ -3221,13 +3280,19 @@ async function leaveSession() {
         'ОСТАТЬСЯ'
     );
     if (!confirmed) return;
+    exitRoom();
+}
 
+// Собственно выход: без вопросов. Отделён от leaveSession, потому что уходят не
+// только по своей воле — исключённого спрашивать не о чем.
+function exitRoom() {
     state.sessionId = null; // очищаем ДО закрытия сокета, чтобы onclose не переподключался
     if (state.ws) state.ws.close();
-    state.isInitiator = false; 
-    state.selectedPoint = null; 
+    state.isInitiator = false;
+    state.selectedPoint = null;
     state.wasRevealed = false;
-    
+    hideReconnectFailed();   // иначе красная полоса про обрыв уезжает на экран входа
+
     document.getElementById('joinScreen').classList.remove('hidden');
     document.getElementById('sessionScreen').classList.add('hidden');
     document.getElementById('leaveBtn').classList.add('hidden');
