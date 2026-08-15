@@ -1459,7 +1459,12 @@ function joinRecentRoom(sessionId) {
     // Если у пользователя уже есть идентификатор — сразу подключаемся к комнате
     if (state.username) {
         document.getElementById('sessionId').value = sessionId;
-        document.getElementById('taskGroup').style.display = 'none';
+        // Раньше здесь стоял style.display = 'none', и он больше никогда не снимался:
+        // если комната оказывалась мёртвой, человек возвращался к форме, у которой
+        // поле задачи исчезло навсегда, а создание комнаты его требует. Состояние
+        // поля выводится из содержимого поля комнаты — этим и занимается
+        // toggleTaskField, у него же снимается класс collapsed.
+        toggleTaskField();
         joinOrCreateSession();
     } else {
         // Если имени ещё нет — подставляем ID и просим ввести имя
@@ -2447,6 +2452,10 @@ async function joinOrCreateSession() {
         }
     } catch (error) {
         toast.error(error.message, 'НЕ УДАЛОСЬ');
+        // Вход не удался — форма должна остаться пригодной для следующей попытки,
+        // в том числе для создания новой комнаты
+        document.getElementById('sessionId').value = '';
+        toggleTaskField();
     } finally {
         btn.disabled = false;
         btn.classList.remove('loading');
@@ -2807,7 +2816,9 @@ function updateSessionDisplay(session) {
         btn.textContent = point;
         btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
-        btn.disabled = !!state.connectionLost;
+        // После вскрытия колода голосов не принимает. Раньше она оставалась на вид
+        // живой — полная непрозрачность и палец-курсор, — и клик молча ничего не делал.
+        btn.disabled = !!state.connectionLost || !!session.revealed;
         grid.appendChild(btn);
     });
     highlightSelectedCard();
@@ -3048,6 +3059,10 @@ async function castVote(point) {
     // подсвечивалась как выбранная, и человек считал, что проголосовал.
     if (state.connectionLost) {
         toast.error('Связь с комнатой потеряна. Обновите страницу, чтобы голосовать.', 'НЕТ СВЯЗИ');
+        return;
+    }
+    if (state.session && state.session.revealed) {
+        toast.warning('Карты уже вскрыты. Нажмите «СБРОС», чтобы голосовать заново.');
         return;
     }
     const previousPoint = state.selectedPoint;

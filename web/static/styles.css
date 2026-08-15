@@ -669,6 +669,25 @@ code {
 }
 
 /* Салют рисуется поверх всего и не должен ловить нажатия */
+/* Поле смены имени берёт вид у остальных полей приложения: без этого оно
+   оставалось нативным — белый прямоугольник шрифтом Arial посреди тёмной темы */
+#renameInput {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-primary);
+    font-family: var(--font-main);
+    font-size: 1em;
+    margin-top: 8px;
+}
+#renameInput:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .salute-canvas {
     position: fixed;
     inset: 0;
@@ -1351,7 +1370,10 @@ code {
 .scale-selector-buttons {
     display: flex;
     gap: 4px;
-    flex-wrap: nowrap;
+    /* Переносим: на узком экране ряд занимал 374 пикселя при 270 доступных,
+       и карандаш редактора своей шкалы уходил за край целиком — доскроллить
+       было нельзя, то есть на телефоне редактор оказывался недоступен. */
+    flex-wrap: wrap;
 }
 
 .scale-btn {
@@ -1428,7 +1450,10 @@ code {
     position: fixed;
     bottom: 24px;
     right: 24px;
-    z-index: 10000;
+    /* Выше модальных окон (10001). Пока тосты лежали ниже, все жалобы редактора
+       шкалы уходили под затемнение окна: контраст падал с 12.3 до 2.7, и человек
+       нажимал кнопку, не понимая, почему ничего не происходит. */
+    z-index: 10003;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1914,8 +1939,12 @@ code {
     .join-title { font-size: 1.4em; letter-spacing: 3px; }
     .join-grid-top,
     .join-grid-bottom {
-        grid-template-columns: 1fr;
+        /* minmax(0, 1fr): без нижней границы колонка считалась по содержимому —
+           417 пикселей в контейнере 346, и правый край с кнопками уезжал за экран */
+        grid-template-columns: minmax(0, 1fr);
+        overflow: visible;
     }
+    .join-grid-top { grid-template-columns: minmax(0, 1fr); }
     .scale-points {
         grid-template-columns: repeat(5, 1fr);
     }
