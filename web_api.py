@@ -244,8 +244,11 @@ async def api_set_scale(request: Request):
             )
 
         game.scale_name = scale_name
-        # Голоса по старой шкале в новой могут отсутствовать — сбрасываем,
-        # иначе среднее считается по значениям, которые нельзя переголосовать.
+        # Своя шкала хранится за человеком, а не в игре: без этой подгрузки комната
+        # получала встроенную «custom» из умолчаний — двадцать значений вместо тех
+        # шести, что ведущий только что сохранил и видит у себя на экране.
+        if scale_name == "custom":
+            game.custom_points = await state.storage.get_custom_scale(f"web_{username}") or []
         game.restart()
         await state.storage.save_game(game)
         manager.reset_session_users(session_id)

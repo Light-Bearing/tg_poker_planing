@@ -680,3 +680,37 @@ class TestСообщенияПоРусски:
         resp = client.post("/api/sessions", json={"username": "<script>", "text": "задача"})
         assert resp.status_code == 400
         assert not resp.json()["error"].isascii()
+
+
+class TestСвояШкалаВКомнате:
+    """Смена шкалы на «custom» должна брать шкалу этого человека.
+
+    Судья интерфейса снял: сохранил шесть значений, выбрал Custom в открытой
+    комнате — команда получила двадцать встроенных. Сервер шкалу помнил, но
+    смена шкалы её не спрашивала.
+    """
+
+    def _своя_шкала(self, client, username, points):
+        resp = client.post("/api/custom-scale", json={"username": username, "points": points})
+        assert resp.status_code == 200, resp.text
+
+    def test_смена_шкалы_берёт_сохранённую(self, client):
+        своя = ["1", "2", "3", "4", "5", "13", "❔", "☕"]
+        self._своя_шкала(client, "Алиса", своя)
+        session_id = client.post("/api/sessions", json={"username": "Алиса", "text": "задача"}).json()["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Алиса", "scale_name": "custom"})
+        assert resp.status_code == 200
+        assert resp.json()["available_points"] == своя
+
+    def test_без_сохранённой_шкалы_смена_не_падает(self, client):
+        session_id = client.post("/api/sessions", json={"username": "Борис", "text": "задача"}).json()["session_id"]
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Борис", "scale_name": "custom"})
+        assert resp.status_code == 200
+        assert len(resp.json()["available_points"]) > 0
+
+    def test_чужая_шкала_не_подставляется(self, client):
+        self._своя_шкала(client, "Алиса", ["1", "2", "3", "4", "5", "13", "❔", "☕"])
+        session_id = client.post("/api/sessions", json={"username": "Борис", "text": "задача"}).json()["session_id"]
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Борис", "scale_name": "custom"})
+        assert resp.json()["available_points"] != ["1", "2", "3", "4", "5", "13", "❔", "☕"]

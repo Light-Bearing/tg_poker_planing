@@ -663,6 +663,11 @@ code {
     justify-content: center;
 }
 
+.point-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
 .reconnect-failed {
     display: flex;
     align-items: center;

@@ -290,6 +290,12 @@ async def websocket_endpoint(websocket: WebSocket):
                                 )
                             else:
                                 game.scale_name = scale_name
+                                # Своя шкала хранится за человеком: без подгрузки
+                                # комната получала встроенную «custom» из умолчаний
+                                if scale_name == "custom":
+                                    game.custom_points = (
+                                        await state.storage.get_custom_scale(f"web_{setter_username}") or []
+                                    )
                                 game.restart()
                                 await state.storage.save_game(game)
                                 manager.reset_session_users(session_id)

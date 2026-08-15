@@ -15,7 +15,7 @@
                 <h1><span class="logo-icon">◇</span>PLANNING POKER</h1>
             </div>
             <div class="header-right">
-                <div id="connectionStatus" class="connection-status disconnected">OFFLINE</div>
+                <div id="connectionStatus" class="connection-status disconnected hidden">НЕТ СВЯЗИ</div>
                 <button class="header-btn sound-btn" onclick="toggleSound()" title="Включить/выключить звуки" aria-label="Включить или выключить звук">
                     <span class="sound-indicator"></span>
                     <span id="soundIcon" role="img" aria-label="Иконка звука">🔊</span>
@@ -41,7 +41,7 @@
                     <h3 class="form-section-title"><span class="diamond"></span> ПОДКЛЮЧЕНИЕ</h3>
                     <div class="form-group">
                         <label for="username">Идентификатор:</label>
-                        <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off">
+                        <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off" onchange="loadOwnCustomScale()">
                     </div>
                     <div class="form-group">
                         <label for="sessionId">Комната:</label>
@@ -148,7 +148,7 @@
                                 </span>
                                 <span class="meta-divider">|</span>
                                 <span class="meta-operator">
-                                    <span class="meta-label">OP:</span>
+                                    <span class="meta-label">ВЕДУЩИЙ:</span>
                                     <strong id="initiatorDisplay"></strong>
                                 </span>
                                 <span class="meta-divider">|</span>
@@ -404,6 +404,27 @@
             <div class="confirm-actions">
                 <button class="btn btn-outline" onclick="closeConfirmModal(false)">ОТМЕНА</button>
                 <button class="btn btn-primary" id="confirmOkBtn" onclick="closeConfirmModal(true)">ПОДТВЕРДИТЬ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- СМЕНА ИМЕНИ. Нативный prompt() не годится: он вне стиля приложения, а в части
+         браузеров диалоги подавлены — кнопка тогда умирала с ошибкой в консоли,
+         и внешне «ничего не происходило». -->
+    <div id="renameModal" class="confirm-modal hidden" role="dialog" aria-modal="true" aria-labelledby="renameTitle" tabindex="-1">
+        <div class="confirm-backdrop" onclick="closeRenameModal()"></div>
+        <div class="confirm-dialog">
+            <div class="confirm-header">
+                <span class="confirm-icon">✎</span>
+                <span class="confirm-title" id="renameTitle">СМЕНА ИМЕНИ</span>
+            </div>
+            <div class="confirm-message">
+                <label for="renameInput">Как вас называть?</label>
+                <input type="text" id="renameInput" autocomplete="off" maxlength="32">
+            </div>
+            <div class="confirm-actions">
+                <button class="btn btn-outline" onclick="closeRenameModal()">ОТМЕНА</button>
+                <button class="btn btn-primary" id="renameOkBtn" onclick="applyRename()">СМЕНИТЬ</button>
             </div>
         </div>
     </div>

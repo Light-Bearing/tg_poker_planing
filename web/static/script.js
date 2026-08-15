@@ -1510,6 +1510,30 @@ function pluralValues(n) {
 }
 
 // Значения выбранной шкалы. Один источник для сводки, превью и окна настроек.
+// Подтягивает свою шкалу с сервера в SERVER_SCALES.custom.
+//
+// SERVER_SCALES приходит из шаблона и содержит встроенную «custom» — двадцать
+// значений по умолчанию. Своя шкала хранится за человеком и до этого запроса
+// странице была неизвестна: превью, сводка и редактор показывали чужие значения,
+// а правка из редактора молча затирала сохранённое.
+async function loadOwnCustomScale() {
+    const username = (document.getElementById('username')?.value || state.username || '').trim();
+    if (!username || typeof SERVER_SCALES === 'undefined') return;
+
+    try {
+        const resp = await fetch(`/api/custom-scale?username=${encodeURIComponent(username)}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!Array.isArray(data.points) || data.points.length === 0) return;
+
+        SERVER_SCALES.custom = data.points;
+        renderScalePoints(CURRENT_SCALE_NAME);
+        renderJoinScaleSelector();
+    } catch (e) {
+        // Нет связи — остаёмся на умолчаниях, это не повод ломать загрузку страницы
+    }
+}
+
 function scalePointsFor(scaleName) {
     const scales = typeof SERVER_SCALES !== 'undefined' ? SERVER_SCALES : null;
     if (scales && scaleName && scales[scaleName]) return scales[scaleName];
@@ -1676,9 +1700,9 @@ function renderCustomScaleEditorList() {
         <div class="scale-editor-item">
             <span class="scale-editor-item-value">${escapeHtml(point)}</span>
             <button class="scale-editor-item-move" onclick="moveCustomPoint(${idx}, -1)"
-                    title="Сдвинуть ${escapeHtml(point)} влево" ${idx === 0 ? 'disabled' : ''}>↑</button>
+                    title="Сдвинуть ${escapeHtml(point)} раньше" ${idx === 0 ? 'disabled' : ''}>↑</button>
             <button class="scale-editor-item-move" onclick="moveCustomPoint(${idx}, 1)"
-                    title="Сдвинуть ${escapeHtml(point)} вправо" ${idx === customScaleBuffer.length - 1 ? 'disabled' : ''}>↓</button>
+                    title="Сдвинуть ${escapeHtml(point)} позже" ${idx === customScaleBuffer.length - 1 ? 'disabled' : ''}>↓</button>
             <button class="scale-editor-item-remove" onclick="removeCustomPoint(${idx})" title="Удалить ${escapeHtml(point)}">✕</button>
         </div>
     `).join('');
@@ -2116,6 +2140,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderJoinScaleSelector();
     renderScalePoints(CURRENT_SCALE_NAME);
     renderRecentRooms();
+    // Своя шкала известна только серверу — спрашиваем сразу, иначе экран входа
+    // покажет умолчания, а комната получит другое
+    loadOwnCustomScale();
 
     // Kick-кнопки рисуются динамически, поэтому слушатель вешается на контейнер.
     // dataset автоматически декодирует HTML-сущности, возвращая исходное имя.
@@ -2186,6 +2213,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // тот слой, который лежит выше: редактор шкалы открывается поверх её настроек.
     const слоиПоУбываниюГлубины = [
         ['confirmModal', () => closeConfirmModal(false)],
+        ['renameModal', closeRenameModal],
         ['scaleEditorModal', closeCustomScaleEditor],
         ['scaleSettingsModal', closeScaleSettings],
         ['newTaskModal', closeNewTaskModal],
@@ -2207,6 +2235,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (e.key === 'Enter' && !e.shiftKey) {
             const активное = document.activeElement;
+
+            const имяВОкне = document.getElementById('renameInput');
+            if (активное === имяВОкне) {
+                e.preventDefault();
+                applyRename();
+                return;
+            }
 
             const новаяЗадача = document.getElementById('newTaskText');
             if (активное === новаяЗадача && новаяЗадача.value.trim()) {
@@ -2425,12 +2460,16 @@ function enterSession(sessionId, session, isInitiator) {
 
 // Связь потеряна окончательно: говорим прямо и даём способ вернуться
 function showReconnectFailed() {
+    state.connectionLost = true;
+    document.querySelectorAll('.point-btn').forEach(b => { b.disabled = true; });
     const баннер = document.getElementById('reconnectFailed');
     if (баннер) баннер.classList.remove('hidden');
     toast.error('Связь с комнатой потеряна. Обновите страницу, чтобы вернуться.', 'НЕТ СВЯЗИ');
 }
 
 function hideReconnectFailed() {
+    state.connectionLost = false;
+    document.querySelectorAll('.point-btn').forEach(b => { b.disabled = false; });
     const баннер = document.getElementById('reconnectFailed');
     if (баннер) баннер.classList.add('hidden');
 }
@@ -2547,7 +2586,10 @@ function connectWebSocket(sessionId) {
 function updateConnectionStatus(status) {
     const el = document.getElementById('connectionStatus');
     el.className = 'connection-status ' + status;
-    el.textContent = { 'connected': 'ONLINE', 'disconnected': 'OFFLINE', 'connecting': 'CONNECTING' }[status] || status;
+    el.textContent = { 'connected': 'НА СВЯЗИ', 'disconnected': 'НЕТ СВЯЗИ', 'connecting': 'ПОДКЛЮЧЕНИЕ' }[status] || status;
+    // Пока человек не вошёл в комнату, рваться нечему: красный значок на входе
+    // читается как «сервис лежит» и встречает всех, кто открыл адрес впервые.
+    el.classList.toggle('hidden', !state.sessionId);
 }
 
 function setScale(scaleName) {
@@ -2742,6 +2784,7 @@ function updateSessionDisplay(session) {
         btn.textContent = point;
         btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
+        btn.disabled = !!state.connectionLost;
         grid.appendChild(btn);
     });
     highlightSelectedCard();
@@ -2810,15 +2853,29 @@ function updateSessionDisplay(session) {
 // Смена имени, не выходя из комнаты. Переносом занимается сервер: имя служит
 // ключом в учёте участников и в идентификаторе голоса, и разъехаться им нельзя.
 function requestRename() {
-    const текущее = state.username || '';
-    const новое = (prompt('Как вас называть?', текущее) || '').trim();
-    if (!новое || новое === текущее) return;
+    const поле = document.getElementById('renameInput');
+    поле.value = state.username || '';
+    document.getElementById('renameModal').classList.remove('hidden');
+    поле.focus();
+    поле.select();
+}
 
+function closeRenameModal() {
+    document.getElementById('renameModal').classList.add('hidden');
+}
+
+function applyRename() {
+    const новое = document.getElementById('renameInput').value.trim();
+    if (!новое || новое === state.username) {
+        closeRenameModal();
+        return;
+    }
     if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
         toast.error('Нет связи с комнатой');
         return;
     }
     state.ws.send(JSON.stringify({ type: 'rename', new_username: новое }));
+    closeRenameModal();
 }
 
 function renderParticipants(session) {
@@ -2961,6 +3018,12 @@ function renderHistogram(session) {
 
 async function castVote(point) {
     if (!state.sessionId) return;
+    // Связь оборвалась окончательно — голос уйти не может. Раньше карта всё равно
+    // подсвечивалась как выбранная, и человек считал, что проголосовал.
+    if (state.connectionLost) {
+        toast.error('Связь с комнатой потеряна. Обновите страницу, чтобы голосовать.', 'НЕТ СВЯЗИ');
+        return;
+    }
     const previousPoint = state.selectedPoint;
     // Запоминаем выбор сразу: свой голос обратно не приходит (real_point скрыт
     // до вскрытия), а грид перерисовывается на каждом broadcast.
@@ -3128,10 +3191,14 @@ async function leaveSession() {
     document.getElementById('sessionScreen').classList.add('hidden');
     document.getElementById('leaveBtn').classList.add('hidden');
 
-    // ✅ НОВОЕ: Очищаем форму подключения
+    // Возвращаем форму входа в согласованное состояние. Мало очистить поля:
+    // класс collapsed вешается на блок задачи, когда в поле комнаты что-то есть,
+    // и после выхода оставался висеть. Поле имело высоту 0, кнопка обещала
+    // «ВОЙТИ», нажатие требовало описать задачу — а описывать было негде.
     document.getElementById('sessionId').value = '';
     document.getElementById('taskText').value = '';
     document.getElementById('taskGroup').style.display = 'block';
+    toggleTaskField();
     
     // Убираем jira-описание если было
     const descEl = document.getElementById('taskJiraDesc');
