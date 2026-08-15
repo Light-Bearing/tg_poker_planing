@@ -2715,6 +2715,15 @@ function updateSessionDisplay(session) {
         state.wasRevealed = true;
         
         soundManager.playReveal();
+
+        // Команда сошлась на одной оценке — редкий момент, обычно вскрытие
+        // показывает разброс. Салют один раз за раунд: обновления прилетают
+        // на каждое действие, и без флага он бил бы очередями.
+        const оценки = (session.votes || []).map(v => v.real_point ?? v.point);
+        if (isUnanimous(оценки, SPECIAL_POINTS)) {
+            launchSalute();
+            toast.success(`Единогласно: ${оценки[0]}`, 'СОГЛАСИЕ');
+        }
     } else if (!session.revealed) {
         state.wasRevealed = false;
     }
