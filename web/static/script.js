@@ -2839,6 +2839,9 @@ function updateSessionDisplay(session) {
     }
     document.getElementById('initiatorDisplay').textContent = session.initiator_name;
     document.getElementById('sessionIdDisplay').textContent = state.sessionId;
+    // Заголовок вкладки обновляем здесь: задачу в комнате могут сменить, и
+    // вкладка должна называться тем, что в ней сейчас обсуждают
+    document.title = roomTitle(state.sessionId, currentJiraIssue?.key);
 
     // Показываем кнопку Jira в хедере
     document.getElementById('jiraBtn').classList.remove('hidden');
@@ -3299,6 +3302,7 @@ function exitRoom() {
     state.selectedPoint = null;
     state.wasRevealed = false;
     hideReconnectFailed();   // иначе красная полоса про обрыв уезжает на экран входа
+    document.title = roomTitle(null, null);
 
     document.getElementById('joinScreen').classList.remove('hidden');
     document.getElementById('sessionScreen').classList.add('hidden');
