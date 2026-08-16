@@ -220,6 +220,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             manager.register_ws_connection(session_id, username, websocket)
                             # Вернулся — отложенный перенос роли отменяется
                             cancel_initiator_transfer(session_id, username)
+                            # Пропуск в комнату. Дальше все действия по HTTP
+                            # подтверждаются им, а не именем в теле запроса.
+                            await websocket.send_json(
+                                {"type": "token", "token": manager.issue_token(session_id, username)}
+                            )
                             if game:
                                 # При reconnect отправляем текущее состояние
                                 current_data = enrich_session_response(game, session_id)
@@ -275,7 +280,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 )
                     elif msg_type == "set_scale":
                         scale_name = msg.get("scale_name", "")
-                        setter_username = msg.get("username", "")
+                        # Имя берём у сокета, а не из сообщения: присланное имя —
+                        # это заявление о себе, а не подтверждение личности
+                        setter_username = username or ""
                         if game:
                             # Только инициатор может менять шкалу
                             if f"web_{setter_username}" != game.initiator.id:
@@ -306,7 +313,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                 )
                     elif msg_type == "kick_user":
                         target_username = msg.get("target_username", "")
-                        kicker_username = msg.get("username", "")
+                        kicker_username = username or ""
                         if game and target_username and kicker_username:
                             if f"web_{kicker_username}" != game.initiator.id:
                                 await websocket.send_json(
@@ -339,12 +346,13 @@ async def websocket_endpoint(websocket: WebSocket):
                                     )
                     elif msg_type == "vote":
                         point = msg.get("point")
-                        raw_vote_username = msg.get("username")
-                        if game and raw_vote_username and point:
-                            vote_username = validate_username(raw_vote_username)
+                        # Голос принадлежит тому, кто вошёл по этому сокету: раньше
+                        # можно было проголосовать за соседа, назвав его имя
+                        if game and username and point:
+                            vote_username = username
                             if not vote_username:
                                 await websocket.send_json(
-                                    {"type": "error", "message": "Недопустимое имя участника"}
+                                    {"type": "error", "message": "Сначала войдите в комнату"}
                                 )
                             elif point not in game.get_points():
                                 err_msg = f"Point '{point}' is not in the current scale" f" ({game.scale_name})"

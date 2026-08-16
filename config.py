@@ -14,7 +14,10 @@ PORT = int(os.getenv("PORT", 8000))
 DB_PATH = os.getenv("PP_BOT_DB_PATH", "/tmp/tg_pp_bot.db")
 PROXY_URL = os.environ.get("PROXY_URL")
 WEB_CHAT_ID = "web"
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+# По умолчанию — никаких чужих источников. Страница ходит к своему же серверу,
+# и CORS ей не нужен вовсе; звёздочка же разрешала любому сайту дёргать наш API
+# из браузера человека, которому достаточно было знать номер комнаты.
+CORS_ORIGINS = [o for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 SESSION_CLEANUP_INTERVAL = float(os.getenv("SESSION_CLEANUP_INTERVAL", 600))
 # Сколько веб-сессия живёт после ухода последнего участника, секунды
 SESSION_TTL_SECONDS = float(os.getenv("SESSION_TTL_SECONDS", 300))

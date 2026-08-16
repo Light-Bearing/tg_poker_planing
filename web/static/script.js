@@ -25,6 +25,7 @@ let state = {
     isInitiator: false,
     selectedPoint: null,
     ws: null,
+    token: null,            // пропуск в комнату: выдаёт сервер при входе
     reconnectAttempts: 0,
     wasRevealed: false,
     session: null,          // последняя сессия с сервера: нужна окну настроек шкалы
@@ -958,7 +959,7 @@ function showJiraIssuePreview(issue) {
                 const linkUrl = `${jiraSettings.jiraUrl}/browse/${l.key}`;
                 return `<div class="jira-preview-link-item">
                     <span class="jira-preview-link-direction">${escapeHtml(l.direction)}</span>
-                    <a href="${linkUrl}" target="_blank" class="jira-preview-link-key">${escapeHtml(l.key)}</a>
+                    <a href="${safeUrl(linkUrl)}" target="_blank" rel="noopener noreferrer" class="jira-preview-link-key">${escapeHtml(l.key)}</a>
                     <span class="jira-preview-link-summary">${escapeHtml(l.summary)}</span>
                 </div>`;
             }).join('') + '</div>';
@@ -966,7 +967,7 @@ function showJiraIssuePreview(issue) {
 
     preview.innerHTML = `
         <div class="jira-preview-header">
-            <a href="${url}" target="_blank" class="jira-preview-link">${key}</a>
+            <a href="${safeUrl(url)}" target="_blank" rel="noopener noreferrer" class="jira-preview-link">${escapeHtml(key)}</a>
             <span class="jira-preview-summary">${escapeHtml(summary)}</span>
         </div>
         ${description ? `<div class="jira-preview-desc">${parseJiraDescription(description)}</div>` : ''}
@@ -1378,12 +1379,13 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// roomLabel живёт в room-label.js
 function saveRecentRoom(sessionId, taskText) {
     let recent = JSON.parse(localStorage.getItem('pp_recent_rooms') || '[]');
     recent = recent.filter(r => r.id !== sessionId);
     recent.unshift({
         id: sessionId,
-        task: taskText || 'Без описания',
+        task: roomLabel(taskText),
         time: Date.now()
     });
     recent = recent.slice(0, MAX_RECENT_ROOMS);
@@ -1506,13 +1508,19 @@ function renderScalePoints(scaleName) {
 function renderJoinScaleSelector() {
     const summary = document.getElementById('joinScaleSummary');
     if (summary) {
-        summary.textContent = describeScale(CURRENT_SCALE_NAME, scalePointsFor(CURRENT_SCALE_NAME));
+        summary.textContent = scaleLabel(CURRENT_SCALE_NAME);
+        summary.title = describeScale(CURRENT_SCALE_NAME, scalePointsFor(CURRENT_SCALE_NAME));
     }
     // Окно настроек может быть открыто прямо сейчас — держим его в согласии
     if (isScaleSettingsOpen()) renderScaleSettings();
 }
 
 // Название шкалы и число значений: «Fibonacci · 9 значений»
+function scaleLabel(scaleName) {
+    const names = typeof SERVER_SCALE_NAMES !== 'undefined' ? SERVER_SCALE_NAMES : {};
+    return (names && names[scaleName]) || scaleName || '—';
+}
+
 function describeScale(scaleName, points) {
     const names = typeof SERVER_SCALE_NAMES !== 'undefined' ? SERVER_SCALE_NAMES : {};
     const label = (names && names[scaleName]) || scaleName || '—';
@@ -1677,7 +1685,10 @@ function renderSessionScaleSelector(session) {
     container.style.display = 'flex';
     const label = scaleNames[session.scale_name] || session.scale_name || '—';
     const count = (session.available_points || scalePointsFor(session.scale_name)).length;
-    summary.textContent = `📐 ${label} · ${count} ${pluralValues(count)}`;
+    // Только название: число значений не влезало и обрывалось на «· 2…»,
+    // а «2» без хвоста непонятно вовсе. Полная сводка осталась в подсказке.
+    summary.textContent = label;
+    summary.title = `${label} · ${count} ${pluralValues(count)}`;
 
     // Шкалу могли сменить с другого места — окно, если открыто, должно это показать
     if (isScaleSettingsOpen() && scaleSettingsContext === 'session') renderScaleSettings();
@@ -2080,7 +2091,9 @@ function updateTaskDisplay() {
         if (jiraTaskLink && jiraTaskLinkUrl) {
             jiraTaskLink.style.display = 'inline';
             jiraTaskLinkUrl.textContent = key;
-            jiraTaskLinkUrl.href = url;
+            // Адрес приходит из данных комнаты: `javascript:` в href — это код,
+            // который выполнится по клику у каждого участника
+            jiraTaskLinkUrl.href = safeUrl(url);
         }
         
         // Показываем ссылку на эпик в заголовке
@@ -2088,7 +2101,7 @@ function updateTaskDisplay() {
             if (epicKey) {
                 epicMeta.style.display = 'inline-flex';
                 epicLinkUrl.textContent = epicKey;
-                epicLinkUrl.href = `${currentJiraIssue.jiraUrl || jiraSettings.jiraUrl || ''}/browse/${epicKey}`;
+                epicLinkUrl.href = safeUrl(`${currentJiraIssue.jiraUrl || jiraSettings.jiraUrl || ''}/browse/${epicKey}`);
             } else {
                 epicMeta.style.display = 'none';
             }
@@ -2563,6 +2576,13 @@ function connectWebSocket(sessionId) {
             
             const message = JSON.parse(event.data);
             
+            // Пропуск в комнату: сервер выдаёт его на входе, и дальше каждое
+            // действие подтверждается им, а не именем в теле запроса
+            if (message.type === 'token') {
+                state.token = message.token;
+                return;
+            }
+
             // ✅ Обработка reconnect - пользователь вернулся после разрыва
             if (message.type === 'reconnected') {
                 console.log('✅ Переподключение успешно');
@@ -2655,29 +2675,23 @@ function updateConnectionStatus(status) {
 function setScale(scaleName) {
     if (!state.isInitiator) return;
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({
-            type: 'set_scale',
-            scale_name: scaleName,
-            username: state.username
-        }));
+        state.ws.send(JSON.stringify({ type: 'set_scale', scale_name: scaleName }));
     }
 }
 
 function toggleAutoReveal() {
     const checkbox = document.getElementById('autoRevealToggle');
     const autoReveal = checkbox.checked;
-    // Берём username из state, localStorage или поля ввода (fallback chain)
-    const username = state.username || localStorage.getItem('pp_username') || document.getElementById('username')?.value?.trim() || '';
-    if (!username) {
-        toast.error('Идентификатор пользователя не найден', 'ОШИБКА');
+    if (!state.token) {
+        toast.error('Войдите в комнату заново', 'НЕТ ПРОПУСКА');
         checkbox.checked = !autoReveal;
         return;
     }
-    
+
     fetch(`/api/sessions/${state.sessionId}/auto-reveal`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ auto_reveal: autoReveal, username })
+        body: JSON.stringify({ auto_reveal: autoReveal, token: state.token })
     })
     .then(response => response.json())
     .then(data => {
@@ -3152,7 +3166,7 @@ async function castVote(point) {
         const response = await fetch(`/api/sessions/${state.sessionId}/vote`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: state.username, point: point })
+            body: JSON.stringify({ token: state.token, point: point })
         });
         if (!response.ok) {
             const err = await response.json();
@@ -3219,7 +3233,7 @@ async function restartSession(newText = null) {
     if (btn) btn.disabled = true;
     
     try {
-        const payload = { username: state.username };
+        const payload = { token: state.token };
         if (newText) payload.new_text = newText;
         const response = await fetch(`/api/sessions/${state.sessionId}/restart`, {
             method: 'POST',
@@ -3263,11 +3277,7 @@ async function kickParticipant(targetUsername) {
     if (!confirmed) return;
 
     if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({
-            type: 'kick_user',
-            username: state.username,
-            target_username: targetUsername
-        }));
+        state.ws.send(JSON.stringify({ type: 'kick_user', target_username: targetUsername }));
     }
 }
 
@@ -3278,7 +3288,7 @@ async function revealCards() {
         const response = await fetch(`/api/sessions/${state.sessionId}/reveal`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username: state.username })
+            body: JSON.stringify({ token: state.token })
         });
         if (!response.ok) {
             const err = await response.json();
@@ -3310,6 +3320,7 @@ function exitRoom() {
     state.isInitiator = false;
     state.selectedPoint = null;
     state.wasRevealed = false;
+    state.token = null;
     hideReconnectFailed();   // иначе красная полоса про обрыв уезжает на экран входа
     document.title = roomTitle(null, null);
 

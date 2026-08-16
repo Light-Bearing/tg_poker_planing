@@ -28,6 +28,16 @@ from web_api import (
 from websocket_handler import websocket_endpoint
 
 
+def пропуск(session_id: str, username: str) -> str:
+    """Пропуск участника комнаты.
+
+    В жизни его выдаёт сервер при входе по веб-сокету; в тестах, где сокета нет,
+    выписываем напрямую — проверяем не выдачу, а то, что без пропуска ничего не
+    работает, а с чужим пропуском не работает чужое.
+    """
+    return manager.issue_token(session_id, username)
+
+
 @pytest.fixture(autouse=True)
 def _setup_state(tmp_path):
     registry = GameRegistry()
@@ -130,7 +140,9 @@ class TestVoting:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["vote_count"] == 1
@@ -139,15 +151,16 @@ class TestVoting:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice"})
+        resp = client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice")})
         assert resp.status_code == 400
 
         resp = client.post(f"/api/sessions/{session_id}/vote", json={"point": "5"})
-        assert resp.status_code == 400
+        assert resp.status_code == 401, "без пропуска дальше не пускают"
 
     def test_vote_session_not_found(self, client):
+        # Пропуска к несуществующей комнате не бывает, поэтому останавливаемся раньше
         resp = client.post("/api/sessions/nonexistent/vote", json={"username": "Alice", "point": "5"})
-        assert resp.status_code == 404
+        assert resp.status_code == 401
 
     def test_vote_after_reveal_returns_400_not_500(self, client):
         """Vote after reveal returns 400, not 500."""
@@ -155,9 +168,9 @@ class TestVoting:
         session_id = create["session_id"]
 
         # Голос нужен: пустой раунд вскрыть больше нельзя
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
-        client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
-        resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"})
+        client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Alice")})
+        resp = client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Bob"), "point": "3"})
         assert resp.status_code == 400
         assert "Session is already revealed" in resp.json().get("error", "")
 
@@ -167,9 +180,9 @@ class TestVoting:
         session_id = create["session_id"]
 
         # Голос нужен: пустой раунд вскрыть больше нельзя
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
-        client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
-        resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"})
+        client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Alice")})
+        resp = client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Bob"), "point": "3"})
         assert resp.status_code == 400
         data = resp.json()
         assert "revealed" in data.get("error", "").lower()
@@ -179,9 +192,9 @@ class TestReveal:
     def test_reveal_by_initiator(self, client):
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"})
 
-        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
+        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Alice")})
         assert resp.status_code == 200
         data = resp.json()
         assert data["revealed"] is True
@@ -191,12 +204,12 @@ class TestReveal:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Bob"})
+        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Bob")})
         assert resp.status_code == 403
 
     def test_reveal_session_not_found(self, client):
         resp = client.post("/api/sessions/nonexistent/reveal", json={"username": "Alice"})
-        assert resp.status_code == 404
+        assert resp.status_code == 401
 
     def test_пустой_раунд_вскрыть_нельзя(self, client):
         """Вскрытый раунд без голосов запирал комнату.
@@ -207,7 +220,7 @@ class TestReveal:
         create = client.post("/api/sessions", json={"username": "Аня", "text": "задача"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Аня"})
+        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Аня")})
         assert resp.status_code == 400
         assert "никто не проголосовал" in resp.json()["error"]
 
@@ -217,18 +230,21 @@ class TestReveal:
     def test_после_первого_голоса_вскрыть_можно(self, client):
         create = client.post("/api/sessions", json={"username": "Аня", "text": "задача"}).json()
         session_id = create["session_id"]
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Аня", "point": "5"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Аня"), "point": "5"})
 
-        assert client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Аня"}).status_code == 200
+        assert (
+            client.post(f"/api/sessions/{session_id}/reveal", json={"token": пропуск(session_id, "Аня")}).status_code
+            == 200
+        )
 
 
 class TestRestart:
     def test_restart_by_initiator(self, client):
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"})
 
-        resp = client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice"})
+        resp = client.post(f"/api/sessions/{session_id}/restart", json={"token": пропуск(session_id, "Alice")})
         assert resp.status_code == 200
         data = resp.json()
         assert data["vote_count"] == 0
@@ -238,7 +254,9 @@ class TestRestart:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "Old task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice", "new_text": "New task"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/restart", json={"token": пропуск(session_id, "Alice"), "new_text": "New task"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["text"] == "New task"
@@ -247,12 +265,12 @@ class TestRestart:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/restart", json={"username": "Bob"})
+        resp = client.post(f"/api/sessions/{session_id}/restart", json={"token": пропуск(session_id, "Bob")})
         assert resp.status_code == 403
 
     def test_restart_session_not_found(self, client):
         resp = client.post("/api/sessions/nonexistent/restart", json={"username": "Alice"})
-        assert resp.status_code == 404
+        assert resp.status_code == 401
 
 
 class TestScale:
@@ -275,7 +293,9 @@ class TestScale:
         session_id = create["session_id"]
         assert create["scale_name"] == "custom"
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "tshirt"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Alice"), "scale_name": "tshirt"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["scale_name"] == "tshirt"
@@ -285,20 +305,23 @@ class TestScale:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice"})
+        resp = client.post(f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Alice")})
         assert resp.status_code == 400
 
     def test_set_scale_session_not_found(self, client):
+        # Пропуска к несуществующей комнате не бывает, поэтому останавливаемся раньше
         resp = client.post("/api/sessions/nonexistent/scale", json={"username": "Alice", "scale_name": "fibonacci"})
-        assert resp.status_code == 404
+        assert resp.status_code == 401
 
     def test_set_scale_unknown_name_rejected(self, client):
         """Опечатка в scale_name должна быть ошибкой, а не молчаливым сбросом голосов."""
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
-        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
+        client.post(f"/api/sessions/{session_id}/vote", json={"token": пропуск(session_id, "Alice"), "point": "5"})
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Alice", "scale_name": "bogus"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Alice"), "scale_name": "bogus"}
+        )
         assert resp.status_code == 400
         assert "bogus" in resp.json()["error"]
 
@@ -445,7 +468,8 @@ class TestCustomScalePointValidation:
         assert payload not in created["available_points"]
 
         vote = client.post(
-            f"/api/sessions/{created['session_id']}/vote", json={"username": "Alice", "point": payload}
+            f"/api/sessions/{created['session_id']}/vote",
+            json={"token": пропуск(created["session_id"], "Alice"), "point": payload},
         )
         assert vote.status_code == 400
 
@@ -460,7 +484,9 @@ class TestKick:
 
         manager.register_user(session_id, "bob")
 
-        resp = client.post(f"/api/sessions/{session_id}/kick", json={"username": "Alice", "target_username": "bob"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/kick", json={"token": пропуск(session_id, "Alice"), "target_username": "bob"}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("ok") is True
@@ -472,7 +498,9 @@ class TestKick:
         manager.register_user(session_id, "bob")
         manager.register_user(session_id, "charlie")
 
-        resp = client.post(f"/api/sessions/{session_id}/kick", json={"username": "bob", "target_username": "charlie"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/kick", json={"token": пропуск(session_id, "bob"), "target_username": "charlie"}
+        )
         assert resp.status_code == 403
 
     def test_kick_user_not_found(self, client):
@@ -480,7 +508,8 @@ class TestKick:
         session_id = create["session_id"]
 
         resp = client.post(
-            f"/api/sessions/{session_id}/kick", json={"username": "Alice", "target_username": "nonexistent"}
+            f"/api/sessions/{session_id}/kick",
+            json={"token": пропуск(session_id, "Alice"), "target_username": "nonexistent"},
         )
         assert resp.status_code == 404
 
@@ -505,7 +534,9 @@ class TestAutoRevealApi:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"username": "Alice", "auto_reveal": True})
+        resp = client.post(
+            f"/api/sessions/{session_id}/auto-reveal", json={"token": пропуск(session_id, "Alice"), "auto_reveal": True}
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["auto_reveal"] is True
@@ -518,7 +549,9 @@ class TestAutoRevealApi:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/auto-reveal", json={"username": "Bob", "auto_reveal": True})
+        resp = client.post(
+            f"/api/sessions/{session_id}/auto-reveal", json={"token": пропуск(session_id, "Bob"), "auto_reveal": True}
+        )
         assert resp.status_code == 403
 
     def test_auto_reveal_persists_after_restart(self, client):
@@ -528,7 +561,7 @@ class TestAutoRevealApi:
         ).json()
         session_id = create["session_id"]
 
-        restart_resp = client.post(f"/api/sessions/{session_id}/restart", json={"username": "Alice"})
+        restart_resp = client.post(f"/api/sessions/{session_id}/restart", json={"token": пропуск(session_id, "Alice")})
         assert restart_resp.status_code == 200
 
         resp = client.get(f"/api/sessions/{session_id}")
@@ -552,30 +585,64 @@ class TestUsernameValidation:
         assert r.status_code == 200
         assert r.json()["initiator_name"] == "Аня"
 
-    def test_vote_rejects_bad_username(self, client):
-        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
-        r = client.post(f"/api/sessions/{created['session_id']}/vote", json={"username": BAD_NAME, "point": "5"})
-        assert r.status_code == 400
-        assert r.json()["error"] == NAME_ERROR
+    def test_действия_без_пропуска_не_проходят(self, client):
+        """Имя в теле запроса больше не служит удостоверением.
 
-    def test_restart_rejects_bad_username(self, client):
+        До пропусков любой участник мог проголосовать за соседа, а зная имя
+        ведущего — оно написано на экране, — вскрыть карты и исключить кого угодно.
+        """
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
-        r = client.post(f"/api/sessions/{created['session_id']}/restart", json={"username": BAD_NAME})
-        assert r.status_code == 400
-        assert r.json()["error"] == NAME_ERROR
+        sid = created["session_id"]
 
-    def test_reveal_rejects_bad_username(self, client):
+        for путь, тело in [
+            ("vote", {"username": "alice", "point": "5"}),
+            ("reveal", {"username": "alice"}),
+            ("restart", {"username": "alice"}),
+            ("scale", {"username": "alice", "scale_name": "fibonacci"}),
+            ("kick", {"username": "alice", "target_username": "bob"}),
+            ("auto-reveal", {"username": "alice", "auto_reveal": True}),
+        ]:
+            ответ = client.post(f"/api/sessions/{sid}/{путь}", json=тело)
+            assert ответ.status_code == 401, путь
+
+        assert client.get(f"/api/sessions/{sid}").json()["revealed"] is False
+        assert client.get(f"/api/sessions/{sid}").json()["vote_count"] == 0
+
+    def test_чужой_пропуск_не_даёт_прав_ведущего(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
-        r = client.post(f"/api/sessions/{created['session_id']}/reveal", json={"username": BAD_NAME})
-        assert r.status_code == 400
-        assert r.json()["error"] == NAME_ERROR
-        assert client.get(f"/api/sessions/{created['session_id']}").json()["revealed"] is False
+        sid = created["session_id"]
+        чужой = пропуск(sid, "bob")
+
+        assert client.post(f"/api/sessions/{sid}/reveal", json={"token": чужой}).status_code == 403
+        assert (
+            client.post(f"/api/sessions/{sid}/kick", json={"token": чужой, "target_username": "alice"}).status_code
+            == 403
+        )
+        assert client.get(f"/api/sessions/{sid}").json()["revealed"] is False
+
+    def test_пропуск_от_другой_комнаты_не_подходит(self, client):
+        первая = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()["session_id"]
+        вторая = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()["session_id"]
+
+        ответ = client.post(f"/api/sessions/{вторая}/vote", json={"token": пропуск(первая, "alice"), "point": "5"})
+        assert ответ.status_code == 401
+
+    def test_голос_принадлежит_владельцу_пропуска(self, client):
+        created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
+
+        # В теле указываем чужое имя — оно не должно ни на что влиять
+        client.post(f"/api/sessions/{sid}/vote", json={"token": пропуск(sid, "bob"), "username": "alice", "point": "5"})
+
+        голоса = client.get(f"/api/sessions/{sid}").json()["votes"]
+        assert [v["username"] for v in голоса] == ["bob"]
 
     def test_kick_rejects_bad_target_username(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
+        sid = created["session_id"]
         r = client.post(
-            f"/api/sessions/{created['session_id']}/kick",
-            json={"username": "alice", "target_username": BAD_NAME},
+            f"/api/sessions/{sid}/kick",
+            json={"token": пропуск(sid, "alice"), "target_username": BAD_NAME},
         )
         assert r.status_code == 400
         assert r.json()["error"] == NAME_ERROR
@@ -585,14 +652,14 @@ class TestVoteSecrecy:
     def test_real_point_hidden_until_reveal(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
         sid = created["session_id"]
-        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+        client.post(f"/api/sessions/{sid}/vote", json={"token": пропуск(sid, "alice"), "point": "5"})
 
         before = client.get(f"/api/sessions/{sid}").json()
         assert before["votes"], "голос должен быть записан"
         assert all("real_point" not in v for v in before["votes"]), "real_point must be hidden before reveal"
         assert "average" not in before, "average must be hidden before reveal"
 
-        client.post(f"/api/sessions/{sid}/reveal", json={"username": "alice"})
+        client.post(f"/api/sessions/{sid}/reveal", json={"token": пропуск(sid, "alice")})
 
         after = client.get(f"/api/sessions/{sid}").json()
         assert after["votes"][0]["real_point"] == "5", "real_point must be present after reveal"
@@ -604,10 +671,10 @@ class TestScaleChangeResetsVotes:
     def test_rest_set_scale_clears_votes(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
         sid = created["session_id"]
-        client.post(f"/api/sessions/{sid}/vote", json={"username": "alice", "point": "5"})
+        client.post(f"/api/sessions/{sid}/vote", json={"token": пропуск(sid, "alice"), "point": "5"})
         assert client.get(f"/api/sessions/{sid}").json()["vote_count"] == 1
 
-        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "alice", "scale_name": "fibonacci"})
+        r = client.post(f"/api/sessions/{sid}/scale", json={"token": пропуск(sid, "alice"), "scale_name": "fibonacci"})
         assert r.status_code == 200
 
         after = client.get(f"/api/sessions/{sid}").json()
@@ -618,7 +685,7 @@ class TestScaleChangeResetsVotes:
     def test_rest_set_scale_rejected_for_non_initiator(self, client):
         created = client.post("/api/sessions", json={"username": "alice", "text": "task"}).json()
         sid = created["session_id"]
-        r = client.post(f"/api/sessions/{sid}/scale", json={"username": "bob", "scale_name": "fibonacci"})
+        r = client.post(f"/api/sessions/{sid}/scale", json={"token": пропуск(sid, "bob"), "scale_name": "fibonacci"})
         assert r.status_code == 403
 
 
@@ -728,20 +795,26 @@ class TestСвояШкалаВКомнате:
         self._своя_шкала(client, "Алиса", своя)
         session_id = client.post("/api/sessions", json={"username": "Алиса", "text": "задача"}).json()["session_id"]
 
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Алиса", "scale_name": "custom"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Алиса"), "scale_name": "custom"}
+        )
         assert resp.status_code == 200
         assert resp.json()["available_points"] == своя
 
     def test_без_сохранённой_шкалы_смена_не_падает(self, client):
         session_id = client.post("/api/sessions", json={"username": "Борис", "text": "задача"}).json()["session_id"]
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Борис", "scale_name": "custom"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Борис"), "scale_name": "custom"}
+        )
         assert resp.status_code == 200
         assert len(resp.json()["available_points"]) > 0
 
     def test_чужая_шкала_не_подставляется(self, client):
         self._своя_шкала(client, "Алиса", ["1", "2", "3", "4", "5", "13", "❔", "☕"])
         session_id = client.post("/api/sessions", json={"username": "Борис", "text": "задача"}).json()["session_id"]
-        resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Борис", "scale_name": "custom"})
+        resp = client.post(
+            f"/api/sessions/{session_id}/scale", json={"token": пропуск(session_id, "Борис"), "scale_name": "custom"}
+        )
         assert resp.json()["available_points"] != ["1", "2", "3", "4", "5", "13", "❔", "☕"]
 
 

@@ -5,6 +5,12 @@
 (function () {
     'use strict';
 
+    // Схему адреса проверяет общий модуль: в браузере он уже загружен, в тестах
+    // на node подтягивается напрямую
+    const безопасныйАдрес = (typeof module !== 'undefined' && module.exports)
+        ? require('./safe-url.js').safeUrl
+        : (typeof window !== 'undefined' && window.safeUrl) || (a => a);
+
     // ========== UTILITY ==========
     // Чистая реализация: не требует DOM (нужно для запуска в Node) и, в отличие
     // от прежней через createElement, экранирует кавычки — результат подставляется
@@ -44,7 +50,7 @@
                     break;
                 }
                 case 'link': {
-                    var href = escapeHtml(mark.attrs && mark.attrs.href || '#');
+                    var href = escapeHtml(безопасныйАдрес(mark.attrs && mark.attrs.href || '#'));
                     result = '<a href="' + href + '" target="_blank" class="jira-desc-link">' + result + '</a>';
                     break;
                 }

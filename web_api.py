@@ -52,6 +52,23 @@ def evict_stale_rate_limits(window: float = 60.0) -> None:
 USERNAME_RE = re.compile(r"[\w \-.]{1,32}", re.UNICODE)
 USERNAME_ERROR = "Имя: от 1 до 32 символов — буквы, цифры, пробел, дефис, точка"
 EMPTY_REVEAL_ERROR = "Открывать нечего: ещё никто не проголосовал"
+NO_TOKEN_ERROR = "Войдите в комнату заново: пропуск не принят"
+
+# Длина описания задачи. Текст хранится в базе и рассылается всем участникам,
+# поэтому мегабайтная «задача» — это и мусор в базе, и лишний трафик каждому.
+MAX_TASK_TEXT = 4000
+TASK_TEXT_ERROR = f"Описание задачи длиннее {MAX_TASK_TEXT} символов"
+
+
+def actor(session_id: str, data: dict) -> str | None:
+    """Кто на самом деле шлёт запрос — по пропуску, выданному при входе в комнату.
+
+    Раньше личностью служило имя из тела запроса, то есть личности не было вовсе:
+    любой участник мог проголосовать за соседа, а зная имя ведущего (оно написано
+    на экране), вскрыть карты, сменить шкалу, подменить задачу и исключить кого
+    угодно. Пропуск выдаёт сервер по веб-сокету и хранит у себя.
+    """
+    return manager.username_by_token(session_id, data.get("token"))
 
 
 def validate_username(raw: str) -> str | None:
@@ -216,6 +233,8 @@ async def api_create_session(request: Request):
             return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
         if not text:
             return JSONResponse({"error": "Task description is required"}, status_code=400)
+        if len(text) > MAX_TASK_TEXT:
+            return JSONResponse({"error": TASK_TEXT_ERROR}, status_code=400)
 
         # Rate limit
         client_ip = request.client.host if request.client else "unknown"
@@ -250,11 +269,11 @@ async def api_set_scale(request: Request):
     try:
         data = await request.json()
         scale_name = data.get("scale_name", "").strip()
-        username = data.get("username", "").strip()
+        username = actor(session_id, data)
         if not scale_name:
             return JSONResponse({"error": "scale_name is required"}, status_code=400)
         if not username:
-            return JSONResponse({"error": "username is required"}, status_code=400)
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
@@ -292,10 +311,10 @@ async def api_set_auto_reveal(request: Request):
     try:
         data = await request.json()
         auto_reveal = data.get("auto_reveal", False)
-        username = data.get("username", "").strip()
+        username = actor(session_id, data)
 
         if not username:
-            return JSONResponse({"error": "username is required"}, status_code=400)
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
@@ -318,6 +337,12 @@ async def api_set_auto_reveal(request: Request):
 
 
 async def api_get_session(request: Request):
+    # Чтение тоже ограничиваем: номер комнаты — единственное, что закрывает её от
+    # посторонних, и перебирать его без счётчика было бесплатно
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(f"get_session:{client_ip}", max_requests=120, window=60):
+        return JSONResponse({"error": "Too many requests. Please slow down."}, status_code=429)
+
     game = await state.storage.get_game(WEB_CHAT_ID, request.path_params["session_id"])
     if not game:
         return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -347,10 +372,10 @@ async def api_vote(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = validate_username(data.get("username", ""))
+        username = actor(session_id, data)
         point = data.get("point", "").strip()
         if not username:
-            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
         if not point:
             return JSONResponse({"error": "Username and point are required"}, status_code=400)
 
@@ -382,10 +407,12 @@ async def api_restart(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = validate_username(data.get("username", ""))
+        username = actor(session_id, data)
         new_text = data.get("new_text", "").strip()
         if not username:
-            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
+        if len(new_text) > MAX_TASK_TEXT:
+            return JSONResponse({"error": TASK_TEXT_ERROR}, status_code=400)
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -409,9 +436,9 @@ async def api_reveal(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = validate_username(data.get("username", ""))
+        username = actor(session_id, data)
         if not username:
-            return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)
         if not game:
             return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -435,9 +462,11 @@ async def api_kick_user(request: Request):
     session_id = request.path_params["session_id"]
     try:
         data = await request.json()
-        username = validate_username(data.get("username", ""))
+        username = actor(session_id, data)
         target_username = validate_username(data.get("target_username", ""))
-        if not username or not target_username:
+        if not username:
+            return JSONResponse({"error": NO_TOKEN_ERROR}, status_code=401)
+        if not target_username:
             return JSONResponse({"error": USERNAME_ERROR}, status_code=400)
 
         game = await state.storage.get_game(WEB_CHAT_ID, session_id)

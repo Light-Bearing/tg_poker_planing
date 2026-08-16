@@ -6,6 +6,12 @@
 (function () {
     'use strict';
 
+    // Схему адреса проверяет общий модуль: в браузере он уже загружен, в тестах
+    // на node подтягивается напрямую
+    const безопасныйАдрес = (typeof module !== 'undefined' && module.exports)
+        ? require('./safe-url.js').safeUrl
+        : (typeof window !== 'undefined' && window.safeUrl) || (a => a);
+
     // Символы, после которых маркер может ОТКРЫВАТЬСЯ, и перед которыми — ЗАКРЫВАТЬСЯ.
     // Так ведёт себя сама Jira: маркер вплотную к букве или цифре разметкой не считается.
     // Именно это правило не даёт превратить user_name_id в курсив, а C++ — в подчёркивание.
@@ -604,7 +610,7 @@
             case 'code':
                 return '<code>' + escapeHtml(node.text) + '</code>';
             case 'link':
-                return '<a href="' + escapeHtml(node.href) + '" target="_blank" class="jira-desc-link">' +
+                return '<a href="' + escapeHtml(безопасныйАдрес(node.href)) + '" target="_blank" class="jira-desc-link">' +
                     renderInline(node.children) + '</a>';
             case 'color':
                 return '<span style="color:' + escapeHtml(node.color) + '">' + renderInline(node.children) + '</span>';

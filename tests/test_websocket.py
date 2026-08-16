@@ -813,6 +813,8 @@ class TestWebSocketVoteValidation:
         )
         await state.storage.save_game(game)
 
+        # Имя в сообщении больше ни на что не влияет: голос принадлежит владельцу
+        # сокета. До входа сокет ничей — голос не должен попасть в игру.
         bad_name = "<img src=x onerror=alert(1)>"
         ws.receive_text.side_effect = [
             json.dumps({"type": "vote", "username": bad_name, "point": "5"}),
@@ -821,9 +823,8 @@ class TestWebSocketVoteValidation:
         ws.send_json.reset_mock()
         await websocket_endpoint(ws)
 
-        error_calls = [call for call in ws.send_json.await_args_list if call.args[0].get("type") == "error"]
-        assert len(error_calls) >= 1
-        assert error_calls[0].args[0]["message"] == "Недопустимое имя участника"
+        saved = await state.storage.get_game("web", "test-session")
+        assert dict(saved.votes) == {}
 
         stored_game = await state.storage.get_game("web", "test-session")
         assert stored_game.votes == {}
@@ -908,7 +909,8 @@ class TestWebSocketSetScale:
         manager.update_user_vote("test-session", "alice", {"point": "5"})
 
         ws.receive_text.side_effect = [
-            '{"type": "set_scale", "scale_name": "tshirt", "username": "alice"}',
+            '{"type": "join", "username": "alice"}',
+            '{"type": "set_scale", "scale_name": "tshirt"}',
             WebSocketDisconnect(),
         ]
         await websocket_endpoint(ws)
@@ -930,7 +932,8 @@ class TestWebSocketSetScale:
         manager.register_user("test-session", "alice")
 
         ws.receive_text.side_effect = [
-            '{"type": "set_scale", "scale_name": "bogus", "username": "alice"}',
+            '{"type": "join", "username": "alice"}',
+            '{"type": "set_scale", "scale_name": "bogus"}',
             WebSocketDisconnect(),
         ]
         ws.send_json.reset_mock()

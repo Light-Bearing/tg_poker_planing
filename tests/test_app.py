@@ -595,8 +595,10 @@ class TestAPIErrorHandling:
             middleware=[Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])],
         )
         tc = TestClient(app)
+        # Пропуска к несуществующей комнате не бывает — останавливаемся на нём,
+        # до чтения игры дело не доходит
         resp = tc.post("/api/sessions/nonexistent/restart", json={"username": "alice"})
-        assert resp.status_code == 404  # session not found, not an exception
+        assert resp.status_code == 401
 
         asyncio.run(state.storage.close())
 
@@ -629,8 +631,11 @@ class TestAPIErrorHandling:
         )
         asyncio.run(state.storage.save_game(game))
 
+        from connection import manager
+
+        пропуск = manager.issue_token("restart_err", "alice")
         with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
-            resp = tc.post("/api/sessions/restart_err/restart", json={"username": "alice"})
+            resp = tc.post("/api/sessions/restart_err/restart", json={"token": пропуск})
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
@@ -665,8 +670,11 @@ class TestAPIErrorHandling:
         game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "5")
         asyncio.run(state.storage.save_game(game))
 
+        from connection import manager
+
+        пропуск = manager.issue_token("reveal_err", "alice")
         with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
-            resp = tc.post("/api/sessions/reveal_err/reveal", json={"username": "alice"})
+            resp = tc.post("/api/sessions/reveal_err/reveal", json={"token": пропуск})
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())
@@ -695,7 +703,12 @@ class TestAPIErrorHandling:
         )
         tc = TestClient(app)
         with patch("web_api.state.storage.get_game", side_effect=Exception("db error")):
-            resp = tc.post("/api/sessions/test/scale", json={"username": "Alice", "scale_name": "fibonacci"})
+            from connection import manager
+
+            resp = tc.post(
+                "/api/sessions/test/scale",
+                json={"token": manager.issue_token("test", "Alice"), "scale_name": "fibonacci"},
+            )
             assert resp.status_code == 500
 
         asyncio.run(state.storage.close())

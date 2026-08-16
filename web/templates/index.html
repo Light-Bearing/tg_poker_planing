@@ -112,9 +112,11 @@
                      в окне настроек, иначе длинная шкала растягивает экран входа -->
                 <div class="scale-preview">
                     <div class="scale-title">ШКАЛА ОЦЕНОК</div>
+                    <!-- Название шкалы само и есть кнопка: отдельная «⚙ НАСТРОИТЬ»
+                         рядом с обрезанным «· 2…» занимала место и ничего не поясняла -->
                     <div class="scale-summary">
-                        <span class="scale-summary-text" id="joinScaleSummary"></span>
-                        <button class="btn btn-outline scale-summary-btn" onclick="openScaleSettings('join')">⚙ НАСТРОИТЬ</button>
+                        <span class="scale-summary-label">Шкала:</span>
+                        <button class="scale-summary-link" id="joinScaleSummary" onclick="openScaleSettings('join')"></button>
                     </div>
                     <div class="scale-points scale-points-compact" id="scalePoints"></div>
                 </div>
@@ -193,8 +195,8 @@
                     <div class="card" id="initiatorControlCard" style="display:none;">
                         <h2><span class="diamond"></span> УПРАВЛЕНИЕ</h2>
                         <div class="scale-summary session-scale-summary" id="sessionScaleSelector">
-                            <span class="scale-summary-text" id="sessionScaleSummary"></span>
-                            <button class="btn btn-outline scale-summary-btn" onclick="openScaleSettings('session')">⚙ ШКАЛА</button>
+                            <span class="scale-summary-label">Шкала:</span>
+                            <button class="scale-summary-link" id="sessionScaleSummary" onclick="openScaleSettings('session')"></button>
                         </div>
                         <div style="display: flex; gap: 8px; flex-direction: column;">
                             <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
@@ -507,8 +509,11 @@
             }
         })();
     </script>
+    <!-- Проверка схемы адресов — раньше разборщиков описаний: они ею пользуются -->
+    <script src="/static/safe-url.js?v={{ asset_version }}"></script>
     <script src="/static/wiki-parser.js?v={{ asset_version }}"></script>
     <script src="/static/jira-search.js?v={{ asset_version }}"></script>
+    <script src="/static/room-label.js?v={{ asset_version }}"></script>
     <script src="/static/glyphs.js?v={{ asset_version }}"></script>
     <script src="/static/title.js?v={{ asset_version }}"></script>
     <script src="/static/salute.js?v={{ asset_version }}"></script>

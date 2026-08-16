@@ -1,4 +1,5 @@
 import asyncio
+import secrets
 import time
 from contextlib import suppress
 from typing import TYPE_CHECKING, Optional
@@ -33,6 +34,42 @@ class ConnectionManager:
         self._orphaned_at: dict[str, float] = {}
         # Когда человек закрыл последнюю вкладку комнаты ((session_id, username) -> time.time())
         self._left_at: dict[tuple[str, str], float] = {}
+        # Пропуска участников: session_id -> токен -> имя.
+        #
+        # До них личностью служило имя, присланное в самом же запросе, — то есть
+        # никакой личности не было. Любой участник мог проголосовать за соседа, а
+        # зная имя ведущего (оно написано на экране), исключить кого угодно,
+        # вскрыть карты и подменить задачу. Пропуск выдаётся при входе в комнату
+        # и живёт только в памяти сервера.
+        self._tokens: dict[str, dict[str, str]] = {}
+
+    def issue_token(self, session_id: str, username: str) -> str:
+        """Выдаёт участнику пропуск в комнату."""
+        token = secrets.token_urlsafe(24)
+        self._tokens.setdefault(session_id, {})[token] = username
+        return token
+
+    def username_by_token(self, session_id: str, token: str | None) -> str | None:
+        """Чей это пропуск. None — если пропуска нет или он не от этой комнаты."""
+        if not token:
+            return None
+        return self._tokens.get(session_id, {}).get(token)
+
+    def revoke_tokens(self, session_id: str, username: str) -> None:
+        """Отзывает все пропуска человека: исключённый не должен ими пользоваться."""
+        выданные = self._tokens.get(session_id)
+        if not выданные:
+            return
+        for token in [t for t, имя in выданные.items() if имя == username]:
+            del выданные[token]
+        if not выданные:
+            del self._tokens[session_id]
+
+    def _rename_tokens(self, session_id: str, old_username: str, new_username: str) -> None:
+        выданные = self._tokens.get(session_id, {})
+        for token, имя in выданные.items():
+            if имя == old_username:
+                выданные[token] = new_username
 
     async def connect(self, session_id: str, websocket: WebSocket):
         """Accept and register a new WebSocket connection for a session."""
@@ -228,6 +265,7 @@ class ConnectionManager:
         ушёл = self._left_at.pop((session_id, old_username), None)
         if ушёл is not None:
             self._left_at[(session_id, new_username)] = ушёл
+        self._rename_tokens(session_id, old_username, new_username)
         return True
 
     def kick_user(self, session_id: str, target_username: str) -> bool:
@@ -259,6 +297,7 @@ class ConnectionManager:
             del self._ws_connections[session_id]
         # Исключённый не должен доживать отсрочку присутствия: его удалили насовсем
         self._left_at.pop((session_id, target_username), None)
+        self.revoke_tokens(session_id, target_username)
         return True
 
     def update_user_vote(self, session_id: str, username: str, vote_data: dict):

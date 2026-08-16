@@ -1286,23 +1286,37 @@ code {
     margin-bottom: 10px;
 }
 
-.scale-summary-text {
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 0.85em;
-    /* Без flex-основы строка сжималась до нуля, и на узком экране от «T-shirt ·
-       8 значений» не оставалось ничего: какая в комнате шкала, было не узнать */
+.scale-summary-label {
+    color: var(--text-secondary);
+    font-family: var(--font-header);
+    font-size: 0.72em;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+/* Название шкалы — оно же кнопка настройки. Отдельная кнопка «⚙ ШКАЛА» рядом с
+   обрезанным «· 2…» съедала ширину и ничего не поясняла. */
+.scale-summary-link {
     flex: 1 1 auto;
     min-width: 0;
+    text-align: left;
+    background: none;
+    border: none;
+    border-bottom: 1px dashed var(--accent);
+    padding: 0 0 1px;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    font-weight: 600;
+    cursor: pointer;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-.scale-summary-btn {
-    flex-shrink: 0;
-    padding: 6px 12px;
-    font-size: 0.72em;
+.scale-summary-link:hover {
+    border-bottom-style: solid;
+    filter: brightness(1.15);
 }
 
 .session-scale-summary {
@@ -2155,7 +2169,7 @@ code {
     /* Кнопка «⚙ ШКАЛА» на узком экране забирала всю строку. Отдаём подписи
        отдельную строку целиком — она короткая, а знать её нужнее, чем экономить 20 px */
     .scale-summary { flex-wrap: wrap; }
-    .scale-summary-text { flex-basis: 100%; white-space: normal; }
+    .scale-summary-link { flex-basis: auto; }
     /* 26 px пальцем не берутся: 44 — минимум, который рекомендуют и Apple, и Google */
     .scale-edit-btn { width: 40px; height: 40px; }
 }
