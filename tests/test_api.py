@@ -19,6 +19,7 @@ from web_api import (
     api_set_auto_reveal,
     api_set_scale,
     api_vote,
+    favicon,
     health,
     info,
     reset_rate_limits,
@@ -67,6 +68,7 @@ def client():
         Route("/api/custom-scale", api_save_custom_scale, methods=["POST"]),
         Route("/healthcheck", health, methods=["GET"]),
         Route("/info", info, methods=["GET"]),
+        Route("/favicon.ico", favicon, methods=["GET"]),
         WebSocketRoute("/ws/{session_id}", websocket_endpoint),
     ]
     app = Starlette(
@@ -714,3 +716,17 @@ class TestСвояШкалаВКомнате:
         session_id = client.post("/api/sessions", json={"username": "Борис", "text": "задача"}).json()["session_id"]
         resp = client.post(f"/api/sessions/{session_id}/scale", json={"username": "Борис", "scale_name": "custom"})
         assert resp.json()["available_points"] != ["1", "2", "3", "4", "5", "13", "❔", "☕"]
+
+
+class TestЗначокСайта:
+    """Браузеры просят /favicon.ico, даже когда в разметке указан PNG."""
+
+    def test_favicon_отдаётся(self, client):
+        ответ = client.get("/favicon.ico")
+        assert ответ.status_code == 200
+        assert ответ.headers["content-type"] == "image/png"
+
+    def test_страница_ссылается_на_значок(self, client):
+        страница = client.get("/").text
+        assert "/static/favicon-32.png" in страница
+        assert "apple-touch-icon" in страница

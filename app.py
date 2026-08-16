@@ -26,6 +26,7 @@ from web_api import (
     api_set_scale,
     api_vote,
     download_extension,
+    favicon,
     health,
     info,
     web_index,
@@ -98,6 +99,7 @@ async def build_app():
     routes = [
         Route("/", web_index, methods=["GET"]),
         Route("/web", web_index, methods=["GET"]),
+        Route("/favicon.ico", favicon, methods=["GET"]),
         Route("/api/sessions", api_create_session, methods=["POST"]),
         Route("/api/sessions/{session_id}", api_get_session, methods=["GET"]),
         Route("/api/sessions/{session_id}/vote", api_vote, methods=["POST"]),

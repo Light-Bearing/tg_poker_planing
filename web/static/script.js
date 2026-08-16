@@ -9,7 +9,10 @@ const JIRA_AUTO_CONNECT_TIMEOUT = 30000;
 const JIRA_AUTO_CONNECT_DELAY = 2000;
 const AUTO_RESTORE_FOCUS_DELAY = 50;
 const RECONNECT_BASE_DELAY = 2000;
-const MAX_RECENT_ROOMS = 5;
+// Три комнаты — столько влезает на экран входа, не заставляя его прокручиваться.
+// Список последних комнат — единственный блок, который растёт сам по себе, и
+// раньше именно он выталкивал экран за край окна.
+const MAX_RECENT_ROOMS = 3;
 const MAX_TOASTS_ON_SCREEN = 4;
 // Судья интерфейса дважды не успел прочесть сообщение об отказе: пока переводишь
 // взгляд от кнопки в правый нижний угол, тоста уже нет.
@@ -1409,7 +1412,9 @@ function formatRecentTime(timestamp) {
 }
 
 function renderRecentRooms() {
-    const recent = loadRecentRooms();
+    // Обрезаем и при показе: в хранилище могли остаться записи от прежней версии,
+    // а лишняя строка выталкивает экран входа за край окна
+    const recent = loadRecentRooms().slice(0, MAX_RECENT_ROOMS);
     const container = document.getElementById('recentRooms');
     const list = document.getElementById('recentList');
     const clearBtn = document.getElementById('clearRecentBtn');
@@ -3318,7 +3323,9 @@ function exitRoom() {
     window.history.pushState({}, '', window.location.pathname);
     
     // Прокручиваем joinScreen наверх, чтобы было видно заголовок
-    document.getElementById('joinScreen').scrollTop = 0;
+    // Прокручивается внутренняя обёртка, а не сама карточка
+    const прокрутка = document.querySelector('#joinScreen .join-scroll');
+    if (прокрутка) прокрутка.scrollTop = 0;
     document.getElementById('username').focus();
 
     // Восстанавливаем дерево Jira на экране входа

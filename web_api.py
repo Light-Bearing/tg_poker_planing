@@ -6,7 +6,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 
 import state
 from config import WEB_CHAT_ID, logger
@@ -179,6 +179,15 @@ def static_version() -> str:
             if path.is_file():
                 latest = max(latest, path.stat().st_mtime)
     return str(int(latest))
+
+
+async def favicon(request: Request):
+    """Значок для тех, кто спрашивает /favicon.ico напрямую.
+
+    Ссылки в разметке ведут на PNG, но браузеры и агрегаторы по привычке
+    дёргают корневой /favicon.ico — в логах это давало ровный поток 404.
+    """
+    return FileResponse("web/static/favicon.png", media_type="image/png")
 
 
 async def web_index(request: Request):
@@ -532,7 +541,7 @@ def extension_version() -> str:
 
 
 async def download_extension(request: Request):
-    from starlette.responses import FileResponse, HTMLResponse
+    from starlette.responses import HTMLResponse
 
     # Проверяем параметр ?download=html — показать страницу с инструкциями
     download_param = request.query_params.get("download", "")
