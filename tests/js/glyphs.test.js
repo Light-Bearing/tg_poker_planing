@@ -9,11 +9,10 @@ const assert = require('node:assert');
 const { pointMarkup, hasIcon, escapeText } = require('../../web/static/glyphs.js');
 
 test('особые карты рисуются значком', () => {
+    assert.match(pointMarkup('❔'), /class="point-glyph point-glyph-unknown"/);
+    assert.match(pointMarkup('☕'), /class="point-glyph point-glyph-coffee"/);
     for (const point of ['❔', '☕']) {
-        const html = pointMarkup(point);
-        assert.ok(html.startsWith('<svg'), `${point} должна рисоваться значком`);
-        assert.ok(html.includes('currentColor'), 'цвет обязан наследоваться от темы');
-        assert.ok(!html.includes(point), 'сам эмодзи в разметку не попадает');
+        assert.ok(!pointMarkup(point).includes(point), 'сам эмодзи в разметку не попадает');
     }
 });
 

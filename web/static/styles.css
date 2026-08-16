@@ -899,14 +899,30 @@ code {
 .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-hover)); transition: width 0.4s ease; box-shadow: 0 0 8px var(--accent-glow); }
 .progress-label { font-size: 0.7em; color: var(--text-secondary); margin-top: 6px; text-align: center; letter-spacing: 1px; font-family: var(--font-mono); }
 
-/* Значки особых карт: размер от текста вокруг, цвет — от того, что унаследовано.
-   Ровно поэтому они и заменили эмодзи: у эмодзи цвет свой, и в светлой теме
-   «не знаю» выглядело выцветшим. */
+/* Значки особых карт. Картинка работает маской, а красит её currentColor —
+   поэтому значок берёт цвет темы и вместе с оценкой краснеет или зеленеет после
+   вскрытия. Ровно этого не умеет эмодзи: у него цвет свой, вшитый в шрифт, и в
+   светлой теме «не знаю» выглядело выцветшим. */
 .point-glyph {
     width: 1.15em;
     height: 1.15em;
     display: inline-block;
     vertical-align: -0.2em;
+    background-color: currentColor;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+}
+.point-glyph-unknown {
+    -webkit-mask-image: url('/static/glyph-unknown.png');
+    mask-image: url('/static/glyph-unknown.png');
+}
+.point-glyph-coffee {
+    -webkit-mask-image: url('/static/glyph-coffee.png');
+    mask-image: url('/static/glyph-coffee.png');
 }
 
 /* ========== POINTS GRID ========== */
