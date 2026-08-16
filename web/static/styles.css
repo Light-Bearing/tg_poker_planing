@@ -322,9 +322,31 @@ body::before {
     gap: 4px;
 }
 
+/* Подписи «ВЕДУЩИЙ:», «ID:», «EPIC:». Прозрачность 0.6 роняла контраст до 2.69:1
+   в тёмной теме и 2.39:1 в светлой — читать приходилось наугад */
 .meta-label {
-    opacity: 0.6;
+    /* Без прозрачности вовсе: даже 0.85 роняло контраст до 4.12:1 при пороге 4.5.
+       Приглушённость даёт сам цвет --text-secondary, разница в размере — иерархию */
     font-size: 0.9em;
+}
+
+/* Переключатель автовскрытия — отдельная строка под кнопкой, а не часть её */
+.auto-reveal {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 2px 0;
+    font-size: 0.72em;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.auto-reveal input {
+    width: auto;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
 }
 
 .meta-divider {
@@ -705,9 +727,9 @@ code {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    /* Выше окон (10001–10002), ниже уведомлений (10003): при открытом окне
-       искры уходили под затемнение, и салюта не было видно вовсе */
-    z-index: 10002;
+    /* Выше содержимого, но ниже окон (10001): искры, летящие по тексту
+       модального окна и его кнопкам, выглядят мусором, а не праздником */
+    z-index: 10000;
 }
 
 .reconnect-failed {
@@ -1017,6 +1039,27 @@ code {
 .join-scroll {
     max-height: calc(100vh - 92px);
     overflow-y: auto;
+}
+
+/* Низкое окно на широком экране — развёрнутый браузер на ноутбуке 1366×768,
+   где вкладки, адресная строка и панель задач съедают полторы сотни пикселей.
+   Два ряда по два блока туда не помещались, и карточка заводила прокрутку.
+   Раскладываем в один ряд: display: contents растворяет обёртки рядов, и их
+   блоки становятся колонками общей сетки. «Как это работает» — рассказ для
+   новичка, им и жертвуем: место дороже. */
+@media (min-width: 901px) and (max-height: 720px) {
+    .join-scroll {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr;
+        gap: 16px;
+        align-items: start;
+    }
+    .join-scroll > .join-header { grid-column: 1 / -1; }
+    /* Через потомка, а не просто по классу: обычные правила рядов объявлены ниже
+       по файлу и при равной точности перебивали бы это */
+    .join-scroll > .join-grid-top,
+    .join-scroll > .join-grid-bottom { display: contents; }
+    .join-scroll .how-column { display: none; }
 }
 
 .join-header {
@@ -1517,9 +1560,12 @@ code {
 .hidden { display: none !important; }
 
 /* ========== TOAST NOTIFICATIONS ========== */
+/* Сверху, а не снизу: внизу справа лежит колода, и уведомление накрывало две
+   последние карты — «не знаю» и «перерыв» — на 79% высоты. А уведомления
+   вылетают на каждый вход, копирование, сброс и смену шкалы, то есть постоянно. */
 .toast-container {
     position: fixed;
-    bottom: 24px;
+    top: 62px;
     right: 24px;
     /* Выше модальных окон (10001). Пока тосты лежали ниже, все жалобы редактора
        шкалы уходили под затемнение окна: контраст падал с 12.3 до 2.7, и человек
@@ -2025,7 +2071,7 @@ code {
     .toast-container {
         left: 12px;
         right: 12px;
-        bottom: 12px;
+        top: 12px;
         max-width: none;
     }
     .toast { min-width: 0; }

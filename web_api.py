@@ -51,6 +51,7 @@ def evict_stale_rate_limits(window: float = 60.0) -> None:
 # имя попадает в HTML и в JS-контекст на фронте.
 USERNAME_RE = re.compile(r"[\w \-.]{1,32}", re.UNICODE)
 USERNAME_ERROR = "Имя: от 1 до 32 символов — буквы, цифры, пробел, дефис, точка"
+EMPTY_REVEAL_ERROR = "Открывать нечего: ещё никто не проголосовал"
 
 
 def validate_username(raw: str) -> str | None:
@@ -73,7 +74,10 @@ SCALE_POINT_ERROR = "Значение шкалы: от 1 до 8 символов
 # чтобы фронт мог показать то же число в подсказке: раньше редактор обещал
 # «минимум 2 значения», а сервер отвечал отказом на всё, что меньше восьми.
 MIN_SCALE_POINTS = 8
-MIN_SCALE_POINTS_ERROR = f"В шкале должно быть не меньше {MIN_SCALE_POINTS} значений вместе с ❔ и ☕"
+MIN_SCALE_POINTS_ERROR = (
+    f"В шкале должно быть не меньше {MIN_SCALE_POINTS} значений "
+    "вместе с картами «не знаю» и «перерыв»"
+)
 
 
 def validate_scale_point(raw: str) -> str | None:
@@ -413,6 +417,10 @@ async def api_reveal(request: Request):
             return JSONResponse({"error": "Session not found"}, status_code=404)
         if f"web_{username}" != game.initiator.id:
             return JSONResponse({"error": "Only initiator can reveal cards"}, status_code=403)
+        if not game.votes:
+            # Вскрытый пустой раунд запирал комнату: колода гасла у всех, результата
+            # не было, объяснения тоже, а «СБРОС» есть только у ведущего
+            return JSONResponse({"error": EMPTY_REVEAL_ERROR}, status_code=400)
 
         game.revealed = True
         await state.storage.save_game(game)

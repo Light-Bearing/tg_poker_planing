@@ -1752,7 +1752,7 @@ function addCustomPoint() {
     const value = input.value.trim();
     if (!value) return;
     if (SPECIAL_POINTS.includes(value)) {
-        toast.warning('❔ и ☕ добавляются автоматически');
+        toast.warning('«Не знаю» и «перерыв» добавляются автоматически');
         return;
     }
     if (!SCALE_POINT_RE.test(value)) {
@@ -2944,6 +2944,15 @@ function updateSessionDisplay(session) {
     
     renderParticipants(session);
     
+    // Открывать нечего, пока никто не проголосовал: вскрытый пустой раунд гасил
+    // колоду у всех и не показывал ничего взамен
+    const кнопкаВскрытия = document.getElementById('revealBtn');
+    if (кнопкаВскрытия) {
+        const нечегоОткрывать = !session.vote_count;
+        кнопкаВскрытия.disabled = нечегоОткрывать || !!session.revealed;
+        кнопкаВскрытия.title = нечегоОткрывать ? 'Никто ещё не проголосовал' : '';
+    }
+
     const controlCard = document.getElementById('initiatorControlCard');
     controlCard.style.display = state.isInitiator ? 'block' : 'none';
     if (state.isInitiator) renderSessionScaleSelector(session);
@@ -3263,7 +3272,7 @@ async function kickParticipant(targetUsername) {
 }
 
 async function revealCards() {
-    const btn = document.querySelector('.btn-success');
+    const btn = document.getElementById('revealBtn');
     btn.disabled = true;
     try {
         const response = await fetch(`/api/sessions/${state.sessionId}/reveal`, {

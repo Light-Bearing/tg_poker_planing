@@ -154,6 +154,8 @@ class TestVoting:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
+        # Голос нужен: пустой раунд вскрыть больше нельзя
+        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
         client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
         resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
         assert resp.status_code == 400
@@ -164,6 +166,8 @@ class TestVoting:
         create = client.post("/api/sessions", json={"username": "Alice", "text": "My task"}).json()
         session_id = create["session_id"]
 
+        # Голос нужен: пустой раунд вскрыть больше нельзя
+        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Alice", "point": "5"})
         client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Alice"})
         resp = client.post(f"/api/sessions/{session_id}/vote", json={"username": "Bob", "point": "3"})
         assert resp.status_code == 400
@@ -193,6 +197,29 @@ class TestReveal:
     def test_reveal_session_not_found(self, client):
         resp = client.post("/api/sessions/nonexistent/reveal", json={"username": "Alice"})
         assert resp.status_code == 404
+
+    def test_пустой_раунд_вскрыть_нельзя(self, client):
+        """Вскрытый раунд без голосов запирал комнату.
+
+        Судья интерфейса снял: колода гасла у всех, карточка результата не
+        появлялась, объяснения не было, а «СБРОС» есть только у ведущего.
+        """
+        create = client.post("/api/sessions", json={"username": "Аня", "text": "задача"}).json()
+        session_id = create["session_id"]
+
+        resp = client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Аня"})
+        assert resp.status_code == 400
+        assert "никто не проголосовал" in resp.json()["error"]
+
+        # И комната осталась закрытой
+        assert client.get(f"/api/sessions/{session_id}").json()["revealed"] is False
+
+    def test_после_первого_голоса_вскрыть_можно(self, client):
+        create = client.post("/api/sessions", json={"username": "Аня", "text": "задача"}).json()
+        session_id = create["session_id"]
+        client.post(f"/api/sessions/{session_id}/vote", json={"username": "Аня", "point": "5"})
+
+        assert client.post(f"/api/sessions/{session_id}/reveal", json={"username": "Аня"}).status_code == 200
 
 
 class TestRestart:

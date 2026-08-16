@@ -48,7 +48,7 @@
                 <div class="form-column">
                     <h3 class="form-section-title"><span class="diamond"></span> ПОДКЛЮЧЕНИЕ</h3>
                     <div class="form-group">
-                        <label for="username">Идентификатор:</label>
+                        <label for="username">Ваше имя:</label>
                         <input type="text" id="username" placeholder="Введите ваше имя" autocomplete="off" onchange="loadOwnCustomScale()">
                     </div>
                     <div class="form-group">
@@ -199,13 +199,14 @@
                         <div style="display: flex; gap: 8px; flex-direction: column;">
                             <button class="btn btn-outline" onclick="toggleNewTaskInput()">✎ НОВАЯ ЗАДАЧА</button>
                             <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>
-                            <button class="btn btn-success" onclick="revealCards()" style="position:relative;">
-                                <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;background:rgba(255,255,255,0.3);padding:4px 8px;border-radius:4px;cursor:pointer;margin-right:8px;">
-                                    <input type="checkbox" id="autoRevealToggle" onchange="toggleAutoReveal()" style="width:auto;margin:0;" onclick="event.stopPropagation()">
-                                    <span>авто</span>
-                                </label>
-                                <span>◈ ОТКРЫТЬ</span>
-                            </button>
+                            <!-- Флажок жил внутри кнопки: глазами это была одна зелёная
+                                 кнопка, у которой левая треть — тумблер, а правые две
+                                 трети — необратимое действие. Развели. -->
+                            <button class="btn btn-success" id="revealBtn" onclick="revealCards()">◈ ОТКРЫТЬ</button>
+                            <label class="auto-reveal">
+                                <input type="checkbox" id="autoRevealToggle" onchange="toggleAutoReveal()">
+                                <span>открывать самому, когда проголосуют все</span>
+                            </label>
                         </div>
                     </div>
                     
@@ -372,9 +373,11 @@
                     <div class="scale-selector-buttons" id="scaleSettingsButtons"></div>
                 </div>
                 <div class="scale-points" id="scaleSettingsPoints"></div>
+                <!-- Значок, а не эмодзи: легенда объясняет то, что человек видит
+                     на картах, и должна выглядеть так же -->
                 <div class="scale-legend">
-                    <span><strong>❔</strong> Не уверен</span>
-                    <span><strong>☕</strong> Нужен перерыв</span>
+                    <span><span class="point-glyph point-glyph-unknown"></span> не знаю</span>
+                    <span><span class="point-glyph point-glyph-coffee"></span> нужен перерыв</span>
                 </div>
                 <div class="scale-settings-hint" id="scaleSettingsHint"></div>
             </div>
@@ -393,7 +396,7 @@
                 <span class="confirm-title" id="scaleEditorTitle">ПОЛЬЗОВАТЕЛЬСКАЯ ШКАЛА</span>
             </div>
             <div class="scale-editor-body">
-                <p class="scale-editor-hint">Добавьте значения для оценки — не меньше шести. ❔ и ☕ добавляются автоматически, вместе получится восемь: столько требует сервер.</p>
+                <p class="scale-editor-hint">Добавьте значения для оценки — не меньше шести. Карты «не знаю» и «перерыв» добавятся сами.</p>
                 <div class="scale-editor-list" id="scaleEditorList"></div>
                 <div class="scale-editor-add">
                     <input type="text" id="scaleEditorNewPoint" placeholder="Новое значение" class="scale-editor-input">

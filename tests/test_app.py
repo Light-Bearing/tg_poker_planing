@@ -661,6 +661,8 @@ class TestAPIErrorHandling:
         game = state.storage.new_game(
             "web", "reveal_err", {"id": "web_alice", "first_name": "A", "username": "alice"}, "task"
         )
+        # Голос обязателен: пустой раунд отклоняется раньше, чем дело дойдёт до записи
+        game.add_vote({"id": "web_alice", "first_name": "A", "username": "alice"}, "5")
         asyncio.run(state.storage.save_game(game))
 
         with patch("web_api.state.storage.save_game", side_effect=Exception("save failed")):
