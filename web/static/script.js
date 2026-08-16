@@ -1493,7 +1493,7 @@ function renderScalePoints(scaleName) {
     }
     container.innerHTML = points.map(point => {
         const isSpecial = SPECIAL_POINTS.includes(point);
-        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${point}</div>`;
+        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${pointMarkup(point)}</div>`;
     }).join('');
 }
 
@@ -1629,7 +1629,7 @@ function renderScaleSettings() {
 
     points.innerHTML = scalePointsFor(selected).map(point => {
         const isSpecial = SPECIAL_POINTS.includes(point);
-        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${escapeHtml(point)}</div>`;
+        return `<div class="scale-point ${isSpecial ? 'special' : ''}">${pointMarkup(point)}</div>`;
     }).join('');
 
     if (hint) {
@@ -2845,7 +2845,9 @@ function updateSessionDisplay(session) {
     session.available_points.forEach(point => {
         const btn = document.createElement('button');
         btn.className = 'point-btn';
-        btn.textContent = point;
+        // innerHTML, а не textContent: у особых карт вместо символа значок.
+        // pointMarkup сам экранирует всё, что не значок
+        btn.innerHTML = pointMarkup(point);
         btn.setAttribute('data-point', point);
         btn.onclick = () => castVote(point);
         // После вскрытия колода голосов не принимает. Раньше она оставалась на вид
@@ -3049,7 +3051,7 @@ function renderParticipants(session) {
             }
             
             // extraClass — внутреннее значение, а point приходит из шкалы: экранируем
-            voteDisplay = `<span class="vote-value revealed${extraClass}">${escapeHtml(point)}</span>`;
+            voteDisplay = `<span class="vote-value revealed${extraClass}">${pointMarkup(point)}</span>`;
         }
 
         const hasVoted = !!p.vote;
@@ -3102,7 +3104,7 @@ function renderHistogram(session) {
         const isSpecial = SPECIAL_POINTS.includes(point);
         return `
             <div class="histogram-row">
-                <span class="histogram-label ${isSpecial ? 'special' : ''}">${escapeHtml(point)}</span>
+                <span class="histogram-label ${isSpecial ? 'special' : ''}">${pointMarkup(point)}</span>
                 <div class="histogram-bar-track">
                     <div class="histogram-bar" style="width: ${pct}%"></div>
                 </div>
