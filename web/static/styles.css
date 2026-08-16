@@ -1138,10 +1138,12 @@ code {
     line-height: 1.3;
 }
 
+/* Тот же раскрой, что и у верхнего ряда. Пока низ делился 1.4 к 1, шов между
+   колонками стоял в двух разных местах, и экран выглядел перекошенным. */
 .join-grid-bottom {
     display: grid;
-    grid-template-columns: 1.4fr 1fr;
-    gap: 20px;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
     overflow: hidden;
 }
 
