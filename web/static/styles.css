@@ -330,23 +330,48 @@ body::before {
     font-size: 0.9em;
 }
 
-/* Переключатель автовскрытия — отдельная строка под кнопкой, а не часть её */
-.auto-reveal {
+/* Тумблер автовскрытия стоит рядом с кнопкой, в той же строке — но своим полем
+   со своей рамкой. Внутри кнопки он занимал её левую треть и выглядел её частью:
+   одна зелёная плашка, где половина — переключатель, а половина — необратимое
+   действие. Отдельной строкой снизу он ел высоту панели, которой и так мало. */
+.reveal-row {
     display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+.reveal-row .btn { flex: 1; }
+
+.auto-reveal {
+    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    padding: 2px 2px 0;
-    font-size: 0.72em;
+    gap: 5px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-family: var(--font-header);
+    font-size: 0.7em;
     letter-spacing: 1px;
     text-transform: uppercase;
-    color: var(--text-secondary);
     cursor: pointer;
+    flex-shrink: 0;
+    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.auto-reveal:hover {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 .auto-reveal input {
     width: auto;
     margin: 0;
     accent-color: var(--accent);
     cursor: pointer;
+}
+/* Включено — видно, не приглядываясь к галочке */
+.auto-reveal:has(input:checked) {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
 }
 
 .meta-divider {

@@ -201,14 +201,17 @@
                             <button class="btn btn-warning" onclick="restartSession()">↻ СБРОС</button>
                             <!-- Флажок жил внутри кнопки: глазами это была одна зелёная
                                  кнопка, у которой левая треть — тумблер, а правые две
-                                 трети — необратимое действие. Развели. -->
-                            <button class="btn btn-success" id="revealBtn" onclick="revealCards()">◈ ОТКРЫТЬ</button>
-                            <label class="auto-reveal">
-                                <input type="checkbox" id="autoRevealToggle" onchange="toggleAutoReveal()">
-                                <!-- Коротко: подпись стоит под кнопкой «ОТКРЫТЬ» и читается
-                                     как условие к ней. Длинная влезала только в две строки. -->
-                                <span>когда все проголосуют</span>
-                            </label>
+                                 трети — необратимое действие. Оставили в той же строке,
+                                 но отдельным полем со своей рамкой: строку не занимает,
+                                 а частью кнопки уже не выглядит. -->
+                            <div class="reveal-row">
+                                <label class="auto-reveal" title="Открывать карты, когда проголосуют все">
+                                    <input type="checkbox" id="autoRevealToggle" onchange="toggleAutoReveal()"
+                                           aria-label="Открывать карты, когда проголосуют все">
+                                    <span>авто</span>
+                                </label>
+                                <button class="btn btn-success" id="revealBtn" onclick="revealCards()">◈ ОТКРЫТЬ</button>
+                            </div>
                         </div>
                     </div>
                     
